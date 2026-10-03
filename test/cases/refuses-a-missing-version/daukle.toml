@@ -1,0 +1,11 @@
+schema = 1
+project = "daukle/node-test"
+version = "1.0.0"
+
+[modules]
+
+[plugins]
+node = "./plugins/node"
+
+[toolchains.node]
+entry = "src/main.mjs"

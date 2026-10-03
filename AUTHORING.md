@@ -1,41 +1,118 @@
 # Authoring notes
 
-**This repository is scaffolded and unimplemented.** It was created on 2026-10-03 so the spec had
-somewhere to land; `plugin.lua`, `lib/runtimes.lua`, `test/` and the example are the work. The
-design is `daukle/docs` `superpowers/specs/2026-10-03-npm-toolchain-design.md`, and everything in
-it is decided.
+The design is `daukle/docs` `superpowers/specs/2026-10-03-npm-toolchain-design.md`. **Four of its
+claims were measured false while implementing it** and are corrected below; the corrections are the
+most useful part of this file, because each one was arrived at by running something rather than by
+reading.
+
+## What the implementation found that the spec did not
+
+**A plugin has no absolute path to the project, so `NODE_OPTIONS` cannot be built in Lua.**
+`context.root` is the literal string `"../../.."`, relative to the derived directory a task runs
+in. The spec's section 7 has the plugin assemble `--import <resolver>` and hand it to
+`daukle.exec`'s `env`, and there is nothing to assemble it from.
+
+**A relative `--import` is worse than no gate at all.** It is resolved against **each process's
+own** working directory, so an unrelated node started elsewhere under an inherited `NODE_OPTIONS`
+dies with `ERR_MODULE_NOT_FOUND` naming a path in its own tree, rather than merely being shadowed.
+An absolute PATH is refused too, on Windows: `Only URLs with a scheme in: file, data, and node are
+supported ... Received protocol 'c:'`. **A `file://` URL is the one spelling that is neither**, and
+it percent-encodes a space, so `NODE_OPTIONS` never needs quoting.
+
+So the resolver is delivered **twice, by two mechanisms**. `node:run` passes
+`--import ./__daukle_resolver__.mjs` on the command line, which is correct because a task's working
+directory is the derived directory. The resolver then writes the absolute form into
+`process.env.NODE_OPTIONS` itself, from its own `import.meta.url`, which is how a descendant gets
+it. That is the spec's semantics with the one step the plugin could not take moved into the file
+that can take it.
+
+**`context.conditions` is not one shape per version, it is one shape per MODULE SYSTEM.** Measured
+on both ends of the supported range:
+
+| node | ESM resolve | CommonJS resolve |
+| --- | --- | --- |
+| v22.15.0 | `Array` | `SafeSet` |
+| v26.3.1 | `Array` | `Array` |
+
+The spec's section 4 reads this as a version difference and adds a `conditions.has` branch "to put
+the active 22 LTS inside the supported range". **Removing that branch changes nothing on either
+release**, proved by mutation: the hook only ever asks whether `import` is present, which is the ESM
+path, which is an `Array` everywhere. `Array.prototype.includes.call` over a `Set` also answers
+`false` rather than throwing, which the spec says it does. A per-shape branch would therefore leave
+one branch untested on whichever node is running, and be silent when wrong, so there is **one path
+that iterates** and both module systems exercise it on every resolve.
+
+**`require.resolve()` does not go through the hook on v22.15.0, and `require()` does.** This is a
+property of the instrument rather than of the resolver, and it cost a whole probe: a suite built on
+`require.resolve` reports every package missing on the one release this toolchain names as its
+floor, while the plugin works there perfectly. **The probe therefore LOADS every specifier and
+compares the file that loaded**, which is the better assertion anyway.
+
+**`npm ci` is not reachable and is not wanted.** The spec's section 8 picks `ci` when a lockfile is
+present, and **a plugin cannot ask whether a file exists**: `daukle.read` raises on a missing file
+and `pcall` is not in the sandbox. It is also the wrong verb here. `ci` refuses when the lockfile
+disagrees with `package.json`, daukle GENERATES `package.json`, so the only way they can disagree is
+that the manifest changed, which is exactly when reconciling is right and refusing is wrong.
 
 ## Read before writing a line of the resolver
 
-Section 3 of that spec, and the resolution measurement's **section 7**, which records four defects
-in the hook that document originally published. **Three of the four are silent when wrong**: they
-return a working module and the wrong one. The published hook also cannot run a single CommonJS
-`require`, because `registerHooks` is synchronous and in-thread so `require.resolve` re-enters the
-hook.
+Three of its four guards are **silent when wrong**: they return a working module and the wrong one.
+Nothing in `test/fixtures/probe/` asserts that a module loaded. Every specifier is compared against
+what node loads natively from a twin of the same tree, run as a child with `NODE_OPTIONS` cleared,
+and against a control in which the resolver is absent and **every** specifier must fail. The control
+is what catches the suite accidentally measuring an ancestor directory's `node_modules`.
 
-Every test compares against **what Node does natively with the same tree**, never against an
-expected string. A dual package answers either way; only the comparison separates the branches.
+Every guard was mutated and watched go red through the real harness. The one that does **not** redden
+on the floor release is the re-entrancy flag, because `require.resolve` does not re-enter the hook
+there; the newest-release case covers it.
 
 ## Things already measured, so do not re-derive them
 
-- the floor is Node **v22.15.0** (v23.5.0 in the 23 line), across ten releases;
-- `context.conditions` is a `Set` on v22.15.0, v23.5.0 and v24.0.0 and an `Array` on v22.23.3,
-  v24.21.0, v25.9.0 and v26.3.1, so ask for `.has` before `.includes`;
+- the floor is Node **v22.15.0** (v23.5.0 in the 23 line), across ten releases. The 23 line is not
+  pinned here, so its sub-floor cannot be reached;
 - `npm --prefix` reads `package.json` from the prefix under npm 11 and from the CURRENT DIRECTORY
   under npm 10.9.2, which Node v22.15.0 bundles. **Run npm with its working directory in the
   derived tree and do not use `--prefix`**;
 - the Windows archive has no `lib/` level, so the path to `npm-cli.js` differs per platform;
 - the POSIX tarball's three symlinks are `bin/npm`, `bin/npx` and `bin/corepack`, and this
-  toolchain names `npm-cli.js` directly, so none of them is load bearing for it.
+  toolchain names `npm-cli.js` directly, so none of them is load bearing for it and `D-57` does not
+  bind;
+- core refuses a non-string `toolchains.node.version` before the plugin sees it, with
+  `toolchains.node.version must be a string`. The plugin's own type check is reachable only through
+  `daukle.require("node:lib/runtimes")`, where the caller is another plugin, and it has a case there.
+
+## Decisions this implementation took that the spec left open
+
+**A constraint resolves to the NEWEST pinned release that satisfies it.** `">=22.15.0"` takes
+26.3.1 today; `"22.15.0"` takes that one exactly. The alternative, taking the lowest, was rejected
+because `>=` states what a project tolerates rather than what it wants. The consequence is java's:
+what a constraint resolves to moves only with a release of this plugin, never with the host and
+never with "whatever is newest on nodejs.org".
+
+**A lower bound below the floor is refused even when it would resolve above it.** `">=20"` would
+pick 26.3.1 and work, and the project would still be claiming it runs on a node where the resolver
+cannot exist.
+
+**`version` has no default.** `daukle/java` defaults because a JDK major is a thing a project can
+have no opinion about; the node release here also fixes the npm major, which it cannot.
 
 ## Conventions this repository is held to
 
-`* -text` is pinned, because the cases compare bytes and `core.autocrlf` would rewrite a checkout
-on Windows for a reason that has nothing to do with the plugin. `line_endings: true` is set on the
-CI caller for the same reason: that pin is also what removes git's own normalisation.
+`* -text` is pinned, because the cases compare bytes and `core.autocrlf` would rewrite a checkout on
+Windows for a reason that has nothing to do with the plugin. `line_endings: true` is set on the CI
+caller for the same reason: that pin is also what removes git's own normalisation. **Audit the
+blobs after any editing session**, because nothing in CI looks at this:
 
-`test/run.sh` runs every case against a **real daukle**, because this plugin's output is npm's and
-a stub of `daukle.exec` would be testing the stub.
+```sh
+git ls-files | while read -r f; do git show "HEAD:$f" \
+  | python -c "import sys; b=sys.stdin.buffer.read(); print('$f') if b.count(b'\r\n') else None"; done
+```
+
+`test/run.sh` runs every case against a **real daukle**, because this plugin's output is node's and
+npm's and a stub of `daukle.exec` would be testing the stub. A case carrying `needs-node` downloads
+a runtime and reaches the registry, so it is skipped unless `DAUKLE_NODE_E2E=1` is set; CI sets it
+on all three runners, because the per-platform archives and the floor release are exercised by
+nothing else.
 
 ## The release artifact
 

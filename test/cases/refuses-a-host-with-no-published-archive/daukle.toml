@@ -1,0 +1,15 @@
+schema = 1
+project = "daukle/node-test"
+version = "1.0.0"
+
+[modules]
+
+[plugins.fixture]
+path = "./plugins/fixture.lua"
+
+# daukle/node has no release, so the alias the fixture declares is overridden
+# with the staged copy. This is the manifest-side form the declaration refuses.
+[plugins.fixture.requires]
+nbase = { path = "./plugins/node" }
+
+[toolchains.fixture]

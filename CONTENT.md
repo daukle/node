@@ -26,21 +26,30 @@ into `build/daukle/node/node_modules` are not reachable from a source file at th
 Neither `NODE_PATH` (CommonJS only) nor a root junction (`daukle` must not require symlinks) is
 available.
 
-What works is a `module.registerHooks` resolve hook delivered through `NODE_OPTIONS`, generated
-into the derived directory beside the `node_modules` it points at. It resolves both module systems,
-needs no root file and no symlink, and is measured against what Node does natively rather than
-against an expectation.
+What works is a `module.registerHooks` resolve hook, generated into the derived directory beside the
+`node_modules` it points at. It resolves both module systems, needs no root file and no symlink, and
+is measured against what Node does natively rather than against an expectation.
+
+**It reaches the process two ways, and both are needed.** `node:run` names it on the command line,
+which is correct because a task's working directory is the derived directory. The hook then writes
+its own absolute `file://` URL into `NODE_OPTIONS`, which is how a descendant process gets it. A
+relative path cannot do that job: `NODE_OPTIONS` is inherited and resolved against each process's
+own working directory, so it would kill an unrelated node started elsewhere rather than merely
+shadow it.
 
 **It is not a free mechanism and the design says so.** Three of its four guards are silent when
 wrong: resolving with `require.resolve` hands an ESM importer the `require` branch of a dual
 package, a nested `node_modules` loses to the hoisted copy, and an ungated hook shadows an
-unrelated project's own packages through an inherited `NODE_OPTIONS`.
+unrelated project's own packages through an inherited `NODE_OPTIONS`. Every one of them is mutated
+and watched go red in this repository's own suite.
 
 ## The minimum Node
 
 **v22.15.0**, and **v23.5.0** within the 23 line, measured across ten releases rather than read off
-when the API was added. The toolchain refuses a constraint that could resolve below it. The npm
-version is not independently choosable: it is whatever the provisioned Node bundles.
+when the API was added. The toolchain refuses a constraint that could resolve below it, even one
+that would in fact resolve above it. The npm version is not independently choosable: it is whatever
+the provisioned Node bundles, and the suite runs the whole resolver probe on the floor release for
+that reason.
 
 ## What it gives up
 

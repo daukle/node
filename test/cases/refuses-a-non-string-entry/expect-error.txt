@@ -1,0 +1,1 @@
+"entry" must name a module as a path string

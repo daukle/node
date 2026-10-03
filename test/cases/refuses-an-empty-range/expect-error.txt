@@ -1,0 +1,1 @@
+is empty, and npm has no empty range
