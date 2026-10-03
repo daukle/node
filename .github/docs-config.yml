@@ -1,0 +1,2 @@
+kind: generic
+description: The node toolchain for daukle. It provisions a Node runtime and drives the npm it bundles in managed mode, generating a package.json and a resolver into the derived directory and placing no file at the project root.
