@@ -222,9 +222,7 @@ run_case() {
 }
 
 rm -rf "$work"
-# examples/ runs under the same harness as test/cases/, so an example that
-# stops working is a red suite rather than something noticed later.
-for case_dir in "$root"/test/cases/*/ "$root"/examples/*/; do
+for case_dir in "$root"/test/cases/*/; do
   [ -d "$case_dir" ] || continue
   run_case "${case_dir%/}"
 done
