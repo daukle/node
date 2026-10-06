@@ -93,6 +93,16 @@ never with "whatever is newest on nodejs.org".
 pick 26.3.1 and work, and the project would still be claiming it runs on a node where the resolver
 cannot exist.
 
+**This is the refusal you are most likely to meet, and the reason is a confusion worth naming.**
+Measured 2026-10-06: **109 `package.json` files under `F:/Documents/GitHub` declare
+`engines.node`, and 100 of them accept node 20.** The natural move when migrating is to copy that
+value into this key, and it is refused.
+
+**They are not the same fact.** `version` here is **which node daukle RUNS**; `engines.node` is what
+your published package supports. **The generated `package.json` carries no `engines` at all**, so
+this toolchain never touches yours: write `">=22.15.0"` here and keep your own range where it was.
+The refusal says so now.
+
 **`version` has no default.** `daukle/java` defaults because a JDK major is a thing a project can
 have no opinion about; the node release here also fixes the npm major, which it cannot.
 
