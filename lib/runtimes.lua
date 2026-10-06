@@ -68,10 +68,18 @@ local function text_of(version)
   return string.format("%d.%d.%d", version[1], version[2], version[3])
 end
 
+--[[ The second sentence exists because of a measurement rather than a hunch:
+     109 package.json files under F:/Documents/GitHub declare engines.node and
+     100 of them accept node 20, so the commonest way to meet this refusal is
+     to copy that value into this key. They are not the same fact, and nothing
+     in the first sentence said so. D-112. ]]
 local BELOW_FLOOR =
   'node %s is below %s, which is the lowest node whose module.registerHooks resolves'
   .. ' a bare specifier for both module systems: this toolchain resolves dependencies'
-  .. ' through that hook and has nothing to fall back on'
+  .. ' through that hook and has nothing to fall back on.'
+  .. ' This key is which node DAUKLE RUNS, which is not what your package supports:'
+  .. ' the generated package.json carries no "engines", so write ">=%s" here and keep'
+  .. ' your own range in your own manifest'
 
 --[[ @implNote the lower bound is refused rather than the resolved version,
      because a constraint is a statement about what the project tolerates. A
@@ -91,7 +99,7 @@ end
 local function resolve(constraint)
   local wanted, exact = lower_bound(constraint)
   if compare(wanted, FLOOR) < 0 then
-    error(string.format(BELOW_FLOOR, text_of(wanted), text_of(FLOOR)), 0)
+    error(string.format(BELOW_FLOOR, text_of(wanted), text_of(FLOOR), text_of(FLOOR)), 0)
   end
   for index = 1, #RELEASES do
     local candidate = parse(RELEASES[index].version, "the pinned version")
