@@ -6,11 +6,13 @@ link of any kind at the project root. daukle downloads a Node runtime, verifies 
 the plugin pins, generates a `package.json` into `build/daukle/node/`, and drives the npm that
 runtime bundles.
 
+```console
+$ daukle node:run
+hello from daukle: 42 is even
 ```
-daukle node:install   # provisions node and installs is-even into build/daukle/node/
-daukle node:run       # installs if needed, then runs src/main.mjs
-daukle tasks          # lists the two tasks the plugin declares and their order
-```
+
+`daukle node:install` provisions node and installs `is-even` into `build/daukle/node/`, and
+`node:run` does that first if needed. `daukle tasks` lists the two tasks and their order.
 
 Run `ls` afterwards. The root still holds only `daukle.toml`, `src/` and `build/`.
 
@@ -22,10 +24,11 @@ away in `build/daukle/node/`, which node's own resolution would never find. What
 is a `module.registerHooks` resolve hook, it covers `import` and `require` alike, and it needs no
 file at the project root and no symlink.
 
-**This copy points at the working tree, and a real project names a coordinate.** The manifest here
-says `node = "./plugins/node"` so that the suite in this repository tests the plugin as it stands;
-a red example then means a real defect rather than a stale release. In your own project the two
-lines are a pinned resolver and a coordinate:
+**This example names a published coordinate, exactly as your project would**, so the directory can
+be copied anywhere and `daukle sync` works. The suite runs it twice, once as committed against the
+published release and once with this repository's working tree staged over a copy, so a break in
+the plugin as it stands reddens this repository rather than waiting for a release. The two lines
+are a pinned resolver and a coordinate:
 
 ```toml
 [resolvers.github]
@@ -70,10 +73,10 @@ Roughly 50 MB of Node, with no progress reported while it downloads, and then np
 registry. It is cached per digest afterwards, shared by every project on the machine that pins the
 same release.
 
-## The two `.txt` files, which are harness inputs rather than part of the example
+## The one file that is a harness input rather than part of the example
 
-`task.txt` and `expect-output.txt` are read by `test/run.sh`, not by daukle. `task.txt` holds the
-one task CI runs here, `node:run`, and `expect-output.txt` the clause its output must contain.
-`needs-node` is the third: it marks the case as one that downloads a runtime and reaches the
-registry, so a local run skips it unless `DAUKLE_NODE_E2E=1` is set. They sit beside the example
-rather than in `test/` so each example carries its own expectations.
+`needs-tools` marks this example as one that downloads a runtime and reaches the registry, so a
+local run skips it unless `DAUKLE_EXAMPLE_E2E=1` is set. CI sets it on every runner. The `console`
+block above is **executed** rather than decorative: its `$ ` line is run and the line beneath it
+must appear in the output, so the command and its result cannot drift apart the way a separate
+expectation file did.
