@@ -1,0 +1,18 @@
+schema = 1
+project = "daukle/node-test"
+version = "1.0.0"
+
+[modules]
+
+[plugins]
+node = "./plugins/node"
+
+# Lowercasing rescues prepublishOnly and mapping rescues every colon, so what
+# is left is a character in neither set. All 904 script names in this tree map
+# cleanly; this is the guard for the ones outside it.
+[toolchains.node]
+version = ">=22.15.0"
+entry = "src/main.mjs"
+
+  [toolchains.node.scripts]
+  "build@prod" = { module = "src/main.mjs" }

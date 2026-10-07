@@ -1,8 +1,14 @@
-daukle.plugin{ api = 1, uses = { "provision", "exec" }, exports = { "lib/runtimes" } }
+daukle.plugin{
+  api = 1,
+  uses = { "provision", "exec", "read", "parse" },
+  exports = { "lib/runtimes" },
+}
 
 local runtimes = daukle.require("lib/runtimes")
+local scripts = daukle.require("lib/scripts")
 
 local RESOLVER_NAME = "__daukle_resolver__.mjs"
+local BIN_RUNNER_NAME = "__daukle_bin__.mjs"
 
 --[[ @implNote three of these four guards return a working module when they are
      wrong, which is why the suite compares every specifier against what node
@@ -78,7 +84,63 @@ registerHooks({
 });
 ]==]
 
-local KNOWN_KEYS = { version = true, entry = true, packages = true, devPackages = true }
+--[[ @implNote an npm bin shim is nothing but "<node> <package>/<bin field>",
+     written three times on Windows (sh, .cmd, .ps1) and once as a symlink
+     elsewhere, and EVERY shape falls back to a node on PATH when none sits
+     beside it, which in a daukle project is the host's node or none at all.
+     So the shims are not used: the bin field is read here, by the node this
+     toolchain provisioned, with the resolver already loaded through --import.
+     That needs no per-platform branch and no cmd.exe.
+
+     Read with fs rather than through a specifier, because a package whose
+     "exports" map does not list "./package.json" refuses to resolve it, and
+     a direct dependency is at node_modules/<name> by npm's own layout. ]]
+local BIN_RUNNER = [==[
+import { readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const [packageName, binName, ...rest] = process.argv.slice(2);
+const packageRoot = join(here, "node_modules", packageName);
+
+let manifest;
+try {
+  manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
+} catch (cause) {
+  throw new Error(`"${packageName}" is not installed, so it has no command to run`, { cause });
+}
+
+const bin = manifest.bin;
+const wanted = binName || packageName;
+let target;
+if (typeof bin === "string") {
+  if (binName && binName !== packageName) {
+    throw new Error(`"${packageName}" publishes one command and it is not "${binName}"`);
+  }
+  target = bin;
+} else if (bin && typeof bin === "object") {
+  target = bin[wanted];
+  if (typeof target !== "string") {
+    const offered = Object.keys(bin).sort().join(", ");
+    throw new Error(
+      `"${packageName}" publishes no command called "${wanted}": set "binName" to one of ${offered}`,
+    );
+  }
+} else {
+  throw new Error(`"${packageName}" publishes no command, so there is nothing to run`);
+}
+
+// The bin reads its own name and arguments out of argv, exactly as it would
+// behind npm's shim, so argv is rewritten before it is imported rather than
+// after it has already read the wrong one.
+const resolved = resolve(packageRoot, target);
+process.argv = [process.argv[0], resolved, ...rest];
+await import(pathToFileURL(resolved).href);
+]==]
+
+local KNOWN_KEYS = { version = true, entry = true, packages = true, devPackages = true,
+                     scripts = true }
 
 local function config_of(context)
   if context.toolchain ~= nil then return context.toolchain.config end
@@ -111,9 +173,14 @@ local function climbs_out(path)
   return string.find(path, "/../", 1, true) ~= nil or string.match(path, "/%.%.$") ~= nil
 end
 
-local function entry_of(config)
+--[[ @implNote "entry" is required only when nothing else says what to run. A
+     project that declares scripts has named several things to run and has no
+     reason to elect one, so demanding an entry there would be demanding a
+     module it does not have; node:run names the scripts instead. ]]
+local function entry_of(config, declared_scripts)
   local entry = config.entry
   if entry == nil then
+    if #declared_scripts > 0 then return nil end
     error('a node toolchain needs an "entry": the module "node:run" runs cannot be inferred', 0)
   end
   if type(entry) ~= "string" then
@@ -200,9 +267,11 @@ local function read(context)
   reject_unknown_keys(config)
   local packages, package_ranges = checked_packages(config, "packages")
   local dev_packages, dev_ranges = checked_packages(config, "devPackages")
+  local declared_scripts = scripts.read(config)
   return {
     version = version_of(context),
-    entry = entry_of(config),
+    entry = entry_of(config, declared_scripts),
+    scripts = declared_scripts,
     packages = packages,
     package_ranges = package_ranges,
     dev_packages = dev_packages,
@@ -218,6 +287,7 @@ daukle.toolchain{
     return {
       ["package.json"] = package_json(spec),
       [RESOLVER_NAME] = RESOLVER,
+      [BIN_RUNNER_NAME] = BIN_RUNNER,
     }
   end,
 }
@@ -249,17 +319,94 @@ daukle.task{
   end,
 }
 
+-- Relative, and correct because a task's working directory is the derived
+-- directory the resolver was generated into. The resolver itself is what hands
+-- descendants the absolute form, since context.root is "../../.." and a plugin
+-- has no absolute path to the project at all.
+local function run_module(root, pick, module_path, args)
+  local argv = { "--import", "./" .. RESOLVER_NAME, module_path }
+  for index = 1, #args do argv[#argv + 1] = args[index] end
+  daukle.exec(root:tool(pick.node), argv)
+end
+
+local function refuse_a_project_with_no_entry(spec)
+  if spec.entry ~= nil then return end
+  local names = {}
+  for index = 1, #spec.scripts do names[index] = "node:" .. spec.scripts[index].task end
+  error('this project declares no "entry", so "node:run" does not name a module: set one, or run'
+        .. ' a script directly with ' .. table.concat(names, ", "), 0)
+end
+
 daukle.task{
   name = "node:run",
   dependsOn = { "node:install" },
   run = function(context)
     local spec = read(context)
+    refuse_a_project_with_no_entry(spec)
     local root, pick = provision_node(context, spec)
-    -- Relative, and correct because a task's working directory is the derived
-    -- directory the resolver was generated into. The resolver itself is what
-    -- hands descendants the absolute form, since context.root is "../../.."
-    -- and a plugin has no absolute path to the project at all.
-    daukle.exec(root:tool(pick.node),
-                { "--import", "./" .. RESOLVER_NAME, context.root .. "/" .. spec.entry })
+    run_module(root, pick, context.root .. "/" .. spec.entry, {})
   end,
 }
+
+local function run_steps(context, spec, script)
+  for index = 1, #script.steps do
+    local step = script.steps[index]
+    if step.kind == "script" then
+      -- read() has already refused a reference to no script and a cycle, so a
+      -- second check here would be a second place for the rule to disagree.
+      for other = 1, #spec.scripts do
+        if spec.scripts[other].name == step.name then
+          run_steps(context, spec, spec.scripts[other])
+        end
+      end
+    elseif step.kind == "module" then
+      local root, pick = provision_node(context, spec)
+      run_module(root, pick, context.root .. "/" .. step.name, step.args)
+    else
+      local root, pick = provision_node(context, spec)
+      local argv = { step.name, step.binName or "" }
+      for at = 1, #step.args do argv[#argv + 1] = step.args[at] end
+      run_module(root, pick, "./" .. BIN_RUNNER_NAME, argv)
+    end
+  end
+end
+
+-- The NAME is closed over and the script is looked up at task time, because the
+-- chunk saw the primary manifest alone and a daukle.lua overlay may have
+-- changed what the script does by the time it runs.
+local function run_script(script_name)
+  return function(context)
+    local spec = read(context)
+    for index = 1, #spec.scripts do
+      if spec.scripts[index].name == script_name then
+        run_steps(context, spec, spec.scripts[index])
+        return
+      end
+    end
+    error(string.format('"%s" is no longer a declared script', script_name), 0)
+  end
+end
+
+--[[ One task per script, which is what makes a package's SECOND entry point
+     reachable: node:run takes one module and a package.json carries a map.
+     Gated on the manifest being declarative, because core accepts a project
+     whose ONLY manifest is daukle.lua by falling back to the overlay, and
+     daukle.parse refuses to run one. There is no pcall here, so an unguarded
+     parse is fatal on every command rather than only on these tasks: that is
+     what daukle/cmake@1.4.0 shipped. Such a project keeps node:install and
+     node:run, because nothing a chunk can reach sees a Lua-declared config. ]]
+local function declarative_manifest()
+  if string.match(daukle.manifest, "%.toml$") == nil then return nil end
+  return daukle.parse(daukle.read(daukle.manifest), daukle.manifest)
+end
+
+local document = declarative_manifest()
+for _, script in ipairs(document ~= nil and scripts.task_scripts(document) or {}) do
+  -- The npm script keeps its own spelling, which is what package.json and a
+  -- reader's muscle memory both carry; only the task name is mapped.
+  daukle.task{
+    name = "node:" .. script.task,
+    dependsOn = { "node:install" },
+    run = run_script(script.name),
+  }
+end

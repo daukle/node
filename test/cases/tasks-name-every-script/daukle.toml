@@ -1,0 +1,19 @@
+schema = 1
+project = "daukle/node-test"
+version = "1.0.0"
+
+[modules]
+
+[plugins]
+node = "./plugins/node"
+
+# A script whose npm name a task name cannot carry: "lint:fix" holds a second
+# colon, so the task is "node:lint.fix" while the script keeps its own spelling.
+[toolchains.node]
+version = ">=22.15.0"
+entry = "src/main.mjs"
+
+  [toolchains.node.scripts]
+  build = { module = "src/main.mjs" }
+  "lint:fix" = { bin = "eslint", args = [".", "--fix"] }
+  release = [{ script = "build" }, { bin = "semver", args = ["-i", "minor"] }]

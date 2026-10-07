@@ -1,0 +1,19 @@
+schema = 1
+project = "daukle/node-test"
+version = "1.0.0"
+
+[modules]
+
+[plugins]
+node = "./plugins/node"
+
+# Two different npm scripts, one daukle task. Merging them silently would run
+# the wrong one; core would take the second declaration as a fatal duplicate
+# and name neither script.
+[toolchains.node]
+version = ">=22.15.0"
+entry = "src/main.mjs"
+
+  [toolchains.node.scripts]
+  "build:all" = { module = "src/main.mjs" }
+  "build.all" = { module = "src/main.mjs" }
