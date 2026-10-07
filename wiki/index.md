@@ -12,8 +12,40 @@ node = "daukle/node@^1"
 
 [toolchains.node]
 version = "22"
-main = "src/index.mjs"
+entry = "src/index.mjs"
 ```
+
+`daukle node:run` runs the `entry`, and `daukle node:install` installs the dependencies.
+
+## A script per task, instead of one entry point
+
+A `package.json` carries a `scripts` map, so this toolchain takes one too. **Every script becomes
+its own task**, which is what makes a project's second entry point reachable:
+
+```toml
+  [toolchains.node.scripts]
+  build = { module = "scripts/build.mjs" }
+  test = { bin = "vitest", args = ["run"] }
+  "lint:fix" = { bin = "eslint", args = [".", "--fix"] }
+  release = [{ script = "build" }, { bin = "semver", args = ["-i", "minor"] }]
+```
+
+`daukle tasks` then names `node:build`, `node:test`, `node:lint.fix` and `node:release`. A script is
+one step or a list of them, run in order and stopping at the first failure, and a step is exactly
+one of:
+
+| step | what it runs |
+| --- | --- |
+| `{ module = "<path>" }` | a module of yours, with the provisioned node |
+| `{ bin = "<package>", args = [...] }` | the command an installed package publishes |
+| `{ script = "<name>" }` | another script declared here |
+
+**A `:` in a script name becomes a `.` in the task name**, because a task name holds one colon and
+that one names the toolchain. The npm script keeps its own spelling; only the task is mapped. Two
+scripts that would map to the same task name are refused, naming both.
+
+**`entry` is only required when you declare no scripts.** With scripts and no `entry`, `node:run`
+tells you which script tasks exist instead.
 
 ## `node` and `npm` are two halves of one language
 
@@ -51,3 +83,13 @@ replace with a test of the fixture.
 
 A lockfile. The cost is named rather than hidden: without one, what a range resolves to can move
 between two runs on different days.
+
+**A shell.** A step names a program and its arguments, never a command line, so `&&`, a pipe, a
+glob and an inline `FOO=1` are all outside. Measured across this organization's own tree, that is
+7% of real npm scripts; for those, a manifest task's `run = { tool, args }` is the escape hatch.
+
+**`npx`.** It fetches an unpinned package at run time, which is the one thing daukle exists to stop.
+
+**Per-script tasks for a project whose only manifest is `daukle.lua`.** Such a project keeps
+`node:install` and `node:run`. A plugin registers its tasks before any overlay is applied and
+cannot read an executable manifest, so the scripts are invisible at the moment the tasks are made.
