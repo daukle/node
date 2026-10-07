@@ -1,0 +1,19 @@
+schema = 1
+project = "daukle/node-test"
+version = "1.0.0"
+
+[modules]
+
+[plugins]
+node = "./plugins/node"
+
+# A cycle is a property of the manifest alone, so it is refused by sync rather
+# than when the task runs: the running form would provision a runtime first and
+# then recurse until something else gave way.
+[toolchains.node]
+version = ">=22.15.0"
+entry = "src/main.mjs"
+
+  [toolchains.node.scripts]
+  build = { script = "package" }
+  package = { script = "build" }

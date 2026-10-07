@@ -348,25 +348,17 @@ daukle.task{
   end,
 }
 
-local function run_steps(context, spec, script, seen)
+local function run_steps(context, spec, script)
   for index = 1, #script.steps do
     local step = script.steps[index]
     if step.kind == "script" then
-      local target
+      -- read() has already refused a reference to no script and a cycle, so a
+      -- second check here would be a second place for the rule to disagree.
       for other = 1, #spec.scripts do
-        if spec.scripts[other].name == step.name then target = spec.scripts[other] end
+        if spec.scripts[other].name == step.name then
+          run_steps(context, spec, spec.scripts[other])
+        end
       end
-      if target == nil then
-        error(string.format('scripts."%s" runs "%s", which is not a declared script',
-                            script.name, step.name), 0)
-      end
-      if seen[step.name] then
-        error(string.format('scripts."%s" runs "%s", which runs itself again', script.name,
-                            step.name), 0)
-      end
-      seen[step.name] = true
-      run_steps(context, spec, target, seen)
-      seen[step.name] = nil
     elseif step.kind == "module" then
       local root, pick = provision_node(context, spec)
       run_module(root, pick, context.root .. "/" .. step.name, step.args)
@@ -387,7 +379,7 @@ local function run_script(script_name)
     local spec = read(context)
     for index = 1, #spec.scripts do
       if spec.scripts[index].name == script_name then
-        run_steps(context, spec, spec.scripts[index], { [script_name] = true })
+        run_steps(context, spec, spec.scripts[index])
         return
       end
     end

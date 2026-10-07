@@ -108,6 +108,42 @@ local function steps_of(value, where)
   return out
 end
 
+--[[ A missing reference and a cycle are both properties of the manifest alone,
+     so they are refused where sync can see them rather than when the task runs:
+     a script that calls itself would otherwise provision a runtime and recurse
+     until something else gave way. ]]
+local function reject_unreachable_references(declared)
+  local by_name = {}
+  for index = 1, #declared do by_name[declared[index].name] = declared[index] end
+
+  local function walk(script, path, on_path)
+    for index = 1, #script.steps do
+      local step = script.steps[index]
+      if step.kind == "script" then
+        local target = by_name[step.name]
+        if target == nil then
+          error(string.format('scripts."%s" runs "%s", which is not a declared script',
+                              script.name, step.name), 0)
+        end
+        if on_path[step.name] then
+          error(string.format('scripts."%s" runs itself again, through %s', step.name,
+                              table.concat(path, " -> ")), 0)
+        end
+        on_path[step.name] = true
+        path[#path + 1] = step.name
+        walk(target, path, on_path)
+        path[#path] = nil
+        on_path[step.name] = nil
+      end
+    end
+  end
+
+  for index = 1, #declared do
+    local script = declared[index]
+    walk(script, { script.name }, { [script.name] = true })
+  end
+end
+
 local function sorted_names(scripts)
   local names = {}
   for name in pairs(scripts) do names[#names + 1] = name end
@@ -141,6 +177,7 @@ local function read(config)
     out[#out + 1] = { name = name, task = task,
                       steps = steps_of(scripts[name], string.format('scripts."%s"', name)) }
   end
+  reject_unreachable_references(out)
   return out
 end
 
