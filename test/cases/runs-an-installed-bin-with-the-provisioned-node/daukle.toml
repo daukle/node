@@ -1,0 +1,20 @@
+schema = 1
+project = "daukle/node-test"
+version = "1.0.0"
+
+[modules]
+
+[plugins]
+node = "./plugins/node"
+
+# semver publishes its command as a bin MAP, so this exercises the branch that
+# reads the field rather than the one that takes a bare string.
+[toolchains.node]
+version = ">=22.15.0"
+entry = "src/main.mjs"
+
+  [toolchains.node.devPackages]
+  semver = "7.6.3"
+
+  [toolchains.node.scripts]
+  check = { bin = "semver", args = ["-c", "1.2.3"] }

@@ -1,0 +1,22 @@
+schema = 1
+project = "daukle/node-test"
+version = "1.0.0"
+
+[modules]
+
+[plugins]
+node = "./plugins/node"
+
+# A sequence stops at the first failing step. Without that, the third module
+# would run and the task would report whatever the LAST step did, which is how
+# a broken build goes green.
+[toolchains.node]
+version = ">=22.15.0"
+entry = "src/main.mjs"
+
+  [toolchains.node.scripts]
+  build = [
+    { module = "src/first.mjs" },
+    { module = "src/fails.mjs" },
+    { module = "src/never.mjs" },
+  ]

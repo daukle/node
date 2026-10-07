@@ -1,0 +1,1 @@
+are different scripts and the same daukle task "node:build.all"

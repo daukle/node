@@ -83,12 +83,21 @@ assert_root_is_clean() {
   return 0
 }
 
+# What a failure must NOT say, which is the only way to assert that something
+# did not happen: a sequence that stops at its first failing step is otherwise
+# indistinguishable from one that ran every step and reported the last.
+assert_absent_clauses() {
+  [ -f "$case_dir/expect-absent.txt" ] || return 0
+  assert_clauses "$case_dir/expect-absent.txt" 0
+}
+
 run_error_case() {
   if (cd "$sandbox" && "$daukle" sync "$manifest_name" >stdout.txt 2>stderr.txt); then
     fail "$label" "expected a failure, got success"
     return 1
   fi
-  assert_clauses "$case_dir/expect-error.txt" 1
+  assert_clauses "$case_dir/expect-error.txt" 1 || return 1
+  assert_absent_clauses
 }
 
 run_task_error_case() {
@@ -96,7 +105,8 @@ run_task_error_case() {
     fail "$label" "expected task $task to fail, got success"
     return 1
   fi
-  assert_clauses "$case_dir/expect-task-error.txt" 1
+  assert_clauses "$case_dir/expect-task-error.txt" 1 || return 1
+  assert_absent_clauses
 }
 
 run_task_case() {
@@ -169,7 +179,11 @@ run_case() {
   case_dir=$1
   name=$(basename "$case_dir")
 
-  for manifest in "$case_dir"/daukle*.toml; do
+  # daukle.lua is included because core accepts one as the PRIMARY manifest when
+  # no daukle.toml sits beside it, and the chunk that registers a task per
+  # script has to survive a format daukle.parse refuses to run.
+  for manifest in "$case_dir"/daukle*.toml "$case_dir"/daukle.lua; do
+    [ -f "$manifest" ] || continue
     manifest_name=$(basename "$manifest")
     label="$name/$manifest_name"
 
@@ -189,7 +203,9 @@ run_case() {
     cp -R "$case_dir" "$sandbox"
     rm -rf "$sandbox/expected" "$sandbox/expect-error.txt" "$sandbox/task.txt" \
            "$sandbox/expect-task-error.txt" "$sandbox/expect-output.txt" \
-           "$sandbox/unchanged.txt" "$sandbox/needs-node"
+           "$sandbox/unchanged.txt" "$sandbox/needs-node" \
+           "$sandbox/expect-tasks.txt" "$sandbox/expect-no-tasks.txt" \
+           "$sandbox/expect-absent.txt"
     stage_plugin "$sandbox"
     # Only the cases that run node get the module trees, so an ordinary sync
     # case's sandbox holds nothing but what its own directory carried.
@@ -197,6 +213,25 @@ run_case() {
 
     if [ -f "$case_dir/expect-error.txt" ]; then
       run_error_case && passed=$((passed + 1))
+      continue
+    fi
+
+    # What `daukle tasks` NAMES. A task is registered when the chunk loads, long
+    # before anything is provisioned, so this needs no node and runs on every
+    # host rather than only where a 50 MB archive has been downloaded.
+    if [ -f "$case_dir/expect-tasks.txt" ]; then
+      if ! (cd "$sandbox" && "$daukle" tasks >stdout.txt 2>stderr.txt); then
+        fail "$label" "daukle tasks failed"
+        sed -n '1,40p' "$sandbox/stderr.txt" >&2
+        continue
+      fi
+      assert_clauses "$case_dir/expect-tasks.txt" 1 || continue
+      # A presence-only assertion cannot catch a task that should NOT be there,
+      # which is how a boundary stays a sentence rather than a check.
+      if [ -f "$case_dir/expect-no-tasks.txt" ]; then
+        assert_clauses "$case_dir/expect-no-tasks.txt" 0 || continue
+      fi
+      passed=$((passed + 1))
       continue
     fi
 

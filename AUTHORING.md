@@ -81,6 +81,42 @@ there; the newest-release case covers it.
   `toolchains.node.version must be a string`. The plugin's own type check is reachable only through
   `daukle.require("node:lib/runtimes")`, where the caller is another plugin, and it has a case there.
 
+## The scripts map, and why it does not run npm's shims
+
+**A package's `scripts` map is modelled as a map of name to STEP**, each step a one-key table
+(`{ module = ... }`, `{ bin = ..., args = [...] }` or `{ script = ... }`). A command STRING is
+deliberately not a step, because it is the place a shell would get in: measured over this tree,
+**7% of the ~900 npm scripts here need true shell features**, and those stay outside with `D-53`'s
+`run = { tool, args }` as the answer. Three step kinds cover **82%**, and each of the remaining
+18% has a named reason (`npx` is unpinned, `bun` is a second runtime, the rest is `D-53`).
+
+**A `bin` step does not run `node_modules/.bin/<name>`.** Measured against a real npm install:
+npm writes **three shims on Windows** (a `/bin/sh` script, `.cmd` and `.ps1`) and a symlink
+elsewhere, and the whole body of each is `<node> <package>/<bin field> "$@"` **falling back to a
+node on `PATH`** when none sits beside it. In a daukle project that is the host's node or none, so
+the shims are both unportable and wrong. The generated `__daukle_bin__.mjs` reads the package's
+own `bin` field instead and imports the target, under the node this toolchain provisioned and with
+the resolver already loaded. It reads `package.json` with `fs` rather than through a specifier,
+because a package whose `exports` map omits `./package.json` refuses to resolve it.
+
+**An npm script name maps to a task name one way: `:` becomes `.`, then lowercase.** Measured over
+this tree: **381 of 904 script names contain a colon**, which a task name cannot hold twice, and
+**not one contains a literal dot** against **137 containing a hyphen**. So `.` is the separator
+that cannot collide with a name a project already has, and all 904 names here map cleanly. The npm
+script keeps its own spelling; only the task is mapped. **A collision is refused, naming both
+scripts**, because a duplicate task is fatal in core and would otherwise name neither.
+
+**`entry` is required only when no script is declared.** A project that declares scripts has named
+several things to run and has no reason to elect one; `node:run` then refuses and names the script
+tasks, which is `daukle/cmake`'s shape for the same problem.
+
+**A project whose ONLY manifest is `daukle.lua` gets no per-script task**, keeping `node:install`
+and `node:run`. Core accepts such a project by falling back to the overlay when no primary exists,
+so `daukle.manifest` names a Lua file, and `daukle.parse` refuses to run an executable format with
+no `pcall` available to soften it. Nothing a chunk can reach sees a Lua-declared config, so the
+alternative to this boundary is not more tasks but a crash on **every** command: that is what
+`daukle/cmake@1.4.0` shipped and `1.4.1` fixed.
+
 ## Decisions this implementation took that the spec left open
 
 **A constraint resolves to the NEWEST pinned release that satisfies it.** `">=22.15.0"` takes

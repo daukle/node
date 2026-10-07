@@ -1,0 +1,5 @@
+node:install
+node:run
+node:build
+node:lint.fix
+node:release

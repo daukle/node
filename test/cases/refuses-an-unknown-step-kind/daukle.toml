@@ -1,0 +1,16 @@
+schema = 1
+project = "daukle/node-test"
+version = "1.0.0"
+
+[modules]
+
+[plugins]
+node = "./plugins/node"
+
+# A command line is deliberately not a step: it is where a shell would get in.
+[toolchains.node]
+version = ">=22.15.0"
+entry = "src/main.mjs"
+
+  [toolchains.node.scripts]
+  build = { shell = "tsc && node dist/main.js" }
