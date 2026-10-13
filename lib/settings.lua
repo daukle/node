@@ -1,0 +1,147 @@
+local runtimes = daukle.require("lib/runtimes")
+local scripts = daukle.require("lib/scripts")
+
+local KNOWN_KEYS = { version = true, entry = true, packages = true, devPackages = true,
+                     scripts = true }
+
+local function config_of(context)
+  if context.toolchain ~= nil then return context.toolchain.config end
+  return context.config
+end
+
+local function reject_unknown_keys(config)
+  for key in pairs(config) do
+    if KNOWN_KEYS[key] == nil then
+      error(string.format('"%s" is not a key this toolchain knows: a misspelled key would'
+                          .. ' otherwise be ignored and build the wrong thing silently', key), 0)
+    end
+  end
+end
+
+local function version_of(context)
+  local version = (context.toolchain ~= nil and context.toolchain.version)
+                  or config_of(context).version
+  if version == nil then
+    error('a node toolchain needs a "version": which node to provision is not inferred, and'
+          .. ' the resolver this toolchain generates does not work below ' .. runtimes.floor, 0)
+  end
+  return version
+end
+
+local function climbs_out(path)
+  if string.match(path, "^/") ~= nil or string.match(path, "^%a:") ~= nil then return true end
+  if string.find(path, "\\", 1, true) ~= nil then return true end
+  if path == ".." or string.match(path, "^%.%./") ~= nil then return true end
+  return string.find(path, "/../", 1, true) ~= nil or string.match(path, "/%.%.$") ~= nil
+end
+
+--[[ @implNote "entry" is required only when nothing else says what to run. A
+     project that declares scripts has named several things to run and has no
+     reason to elect one, so demanding an entry there would be demanding a
+     module it does not have; node:run names the scripts instead. ]]
+local function entry_of(config, declared_scripts)
+  local entry = config.entry
+  if entry == nil then
+    if #declared_scripts > 0 then return nil end
+    error('a node toolchain needs an "entry": the module "node:run" runs cannot be inferred', 0)
+  end
+  if type(entry) ~= "string" then
+    error('"entry" must name a module as a path string, not a ' .. type(entry), 0)
+  end
+  if entry == "" or climbs_out(entry) then
+    error(string.format('"entry" must name a module inside the project, and "%s" does not', entry), 0)
+  end
+  return entry
+end
+
+local SCOPED = "^@[%w][%w%.%_%-]*/[%w][%w%.%_%-]*$"
+local PLAIN = "^[%w][%w%.%_%-]*$"
+
+--[[ @implNote the generated package.json is written without a json escaper, so
+     what could need escaping is refused at the edge instead. Every npm name and
+     every range a user can mean is inside this set; a value outside it would
+     otherwise produce a file npm parses as something else. ]]
+local function checked_range(name, range, key)
+  if type(range) ~= "string" then
+    error(string.format('%s."%s" must be a version range as a string, not a %s',
+                        key, name, type(range)), 0)
+  end
+  if range == "" then
+    error(string.format('%s."%s" is empty, and npm has no empty range', key, name), 0)
+  end
+  if string.match(range, '^[%w%s%.%-%+%*|<>=~^%(%)/:#@]+$') == nil then
+    error(string.format('%s."%s" is not a version range this toolchain writes: "%s" holds a'
+                        .. ' character that would have to be escaped into the generated'
+                        .. ' package.json', key, name, range), 0)
+  end
+  return range
+end
+
+local function checked_packages(config, key)
+  local packages = config[key]
+  if packages == nil then return {} end
+  if type(packages) ~= "table" then
+    error('"' .. key .. '" must be a table of package name to version range, not a '
+          .. type(packages), 0)
+  end
+  if #packages > 0 then
+    error('"' .. key .. '" must be a table of package name to version range, not a list:'
+          .. ' a list says nothing about which version of a package is wanted', 0)
+  end
+  local names = {}
+  for name, range in pairs(packages) do
+    if type(name) ~= "string"
+       or (string.match(name, PLAIN) == nil and string.match(name, SCOPED) == nil) then
+      error(string.format('"%s" is not an npm package name: a name is "lodash" or "@scope/name"',
+                          tostring(name)), 0)
+    end
+    checked_range(name, range, key)
+    names[#names + 1] = name
+  end
+  table.sort(names)
+  return names, packages
+end
+
+local function json_object(names, packages, indent)
+  if #names == 0 then return "{}" end
+  local body = ""
+  for index = 1, #names do
+    local separator = index == #names and "\n" or ",\n"
+    body = body .. indent .. '  "' .. names[index] .. '": "' .. packages[names[index]] .. '"'
+            .. separator
+  end
+  return "{\n" .. body .. indent .. "}"
+end
+
+--[[ No "name": the project did not choose one and a generated name would show
+     up in npm's output as if it had. "private" is what stops npm asking for the
+     name and the version a publishable package needs. ]]
+local function package_json(spec)
+  return '{\n'
+    .. '  "private": true,\n'
+    .. '  "dependencies": ' .. json_object(spec.packages, spec.package_ranges, "  ") .. ',\n'
+    .. '  "devDependencies": ' .. json_object(spec.dev_packages, spec.dev_ranges, "  ") .. '\n'
+    .. '}\n'
+end
+
+local function read(context)
+  local config = config_of(context)
+  reject_unknown_keys(config)
+  local packages, package_ranges = checked_packages(config, "packages")
+  local dev_packages, dev_ranges = checked_packages(config, "devPackages")
+  local declared_scripts = scripts.read(config)
+  return {
+    version = version_of(context),
+    entry = entry_of(config, declared_scripts),
+    scripts = declared_scripts,
+    packages = packages,
+    package_ranges = package_ranges,
+    dev_packages = dev_packages,
+    dev_ranges = dev_ranges,
+  }
+end
+
+return {
+  read = read,
+  package_json = package_json,
+}
