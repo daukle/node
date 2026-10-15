@@ -13,11 +13,11 @@ It also exports `lib/runtimes`, the table of which Node archive a host needs and
 ## Why this is not `daukle/npm`
 
 `daukle/npm` is a `daukle.language` plugin: it edits a `package.json` you own and maintain, which
-is adopted mode. This repository is managed mode, and the two cannot share a plugin. Core refuses
-it: `lua_declare_language` raises `daukle.provision is available only to a toolchain or publisher
-plugin` for any chunk that declared `provision` or `exec`. The managed-mode architecture's
-section 4 says one repository may provide both; it is wrong, and `daukle/c` paid for the same
-collision first.
+is adopted mode. This repository is managed mode. **They are two plugins because, until
+`daukle 0.8.0`, core refused a language in any chunk that declared `provision` or `exec`**, the
+collision `daukle/c` paid for first. `0.8.0` lifted that (`D-133`, plugin api 2): a language's
+`apply` is refused `exec` at run time instead, so the two could now share a chunk. Nobody has asked
+for that, and `daukle/npm`'s published `1.0.0` is what keeps them apart.
 
 ## How resolution works without a root file
 
