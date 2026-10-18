@@ -1,6 +1,9 @@
-local SHELL_CHARACTER = "[|;<>$`*?(){}~\\&!#]"
+local SHELL_CHARACTER = "[|;<>$`*?(){}~\\&!#%%%^%[%]]"
 local SHELL_WORDS = { cd = true, rm = true, cp = true, mv = true, mkdir = true, echo = true,
-                      set = true, export = true, cat = true, test = true }
+                      set = true, export = true, cat = true, test = true,
+                      exec = true, time = true, exit = true, ["true"] = true, ["false"] = true,
+                      ["if"] = true, ["then"] = true, ["for"] = true, ["while"] = true,
+                      source = true, ["."] = true }
 local RUNNERS = { npx = true, pnpm = true, yarn = true, bun = true, deno = true }
 local NPM_SCRIPT_VERBS = { test = "test", t = "test", start = "start", stop = "stop",
                            restart = "restart" }
@@ -19,6 +22,10 @@ local function words_of(text)
     elseif character == '"' or character == "'" then
       local closing = string.find(text, character, index + 1, true)
       if closing == nil then return nil, "has an unterminated quote" end
+      local after = string.sub(text, closing + 1, closing + 1)
+      if after ~= "" and not string.match(after, "%s") then
+        return nil, string.format(SHELL, string.sub(text, index, closing + 1))
+      end
       local quoted = string.sub(text, index + 1, closing - 1)
       if string.find(quoted, SHELL_CHARACTER) then return nil, string.format(SHELL, quoted) end
       words[#words + 1] = quoted
@@ -26,6 +33,9 @@ local function words_of(text)
     else
       local finish = (string.find(text, "[%s\"']", index) or length + 1) - 1
       local word = string.sub(text, index, finish)
+      if string.find(string.sub(text, finish + 1, finish + 1), "[\"']") then
+        return nil, string.format(SHELL, word .. string.sub(text, finish + 1, finish + 1))
+      end
       if string.find(word, SHELL_CHARACTER) then return nil, string.format(SHELL, word) end
       words[#words + 1] = word
       index = finish + 1
@@ -35,6 +45,7 @@ local function words_of(text)
 end
 
 local function parse(body)
+  if string.find(body, "[\r\n]") then return nil, string.format(SHELL, "a line break") end
   local segments = {}
   for piece in string.gmatch(body .. "&&", "(.-)&&") do
     local words, reason = words_of(piece)

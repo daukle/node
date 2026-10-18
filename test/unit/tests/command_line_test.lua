@@ -57,4 +57,13 @@ return {
   refuses('eslint "src', "unterminated"),
   refuses('eslint "a*b"', "shell"),
   refuses("a & b", "shell"),
+  refuses("tsc\nrm -rf dist", "shell"),
+  refuses("tsc\r\nrm -rf dist", "shell"),
+  refuses('eslint src"dir"', "shell"),
+  refuses('eslint --ext=".js,.ts" src', "shell"),
+  refuses("'a''b'", "shell"),
+  refuses('eslint "%PATH%"', "shell"),
+  refuses("tsc a^b", "shell"),
+  refuses("eslint src/[ab].js", "shell"),
+  refuses("exec tsc", "shell"),
 }

@@ -13,7 +13,7 @@ local function partial(text)
   for index = 1, #pieces do
     local piece = pieces[index]
     if piece == "x" or piece == "X" or piece == "*" then break end
-    if string.match(piece, "^%d+$") == nil then return nil end
+    if string.match(piece, "^%d+$") == nil or string.match(piece, "^0%d") then return nil end
     out[index] = tonumber(piece)
   end
   return out

@@ -34,4 +34,6 @@ return {
   refuses("22.15.0-beta.1", "cannot read"),
   refuses(">=lts", "cannot read"),
   refuses("", "cannot read"),
+  refuses("022", "cannot read"),
+  refuses("22.015", "cannot read"),
 }
