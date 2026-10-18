@@ -90,7 +90,9 @@ toolchain cannot.
 - `npx`, `pnpm`, `yarn`, `bun`, `deno`, `node` followed by a flag, and any other `npm` verb.
 - A command no direct dependency provides, or two do.
 - A dependency on a local path: `file:`, `link:`, or a path such as `./lib`, `../lib`, `/abs` or a
-  `.tgz` file.
+  `.tgz` file, and a `workspace:` or `catalog:` range.
+- Dependencies npm cannot install as declared, with no lockfile and no project `.npmrc`: a version
+  that does not exist, or a peer conflict. The blocker carries npm's own error.
 - A `package.json` below the package root, in any directory but `node_modules`, `.git` and the
   derived `build/daukle`, and a directory that search cannot list.
 - Lifecycle scripts, and a `pre<x>` or `post<x>` beside an `<x>`.
@@ -98,7 +100,8 @@ toolchain cannot.
   `exports`, `imports`, `files`, `publishConfig`, `packageManager` and the other fields
   `NPM-SURFACE.md` records absent, and any field the migrator does not know.
 - Every `engines` key other than `node`.
-- An `npm-shrinkwrap.json`, `.npmrc`, `.nvmrc` or `.node-version`.
+- An `npm-shrinkwrap.json`, `.npmrc`, `.nvmrc` or `.node-version`, and another package manager's
+  lockfile: `yarn.lock`, `pnpm-lock.yaml`, `bun.lock` or `bun.lockb`.
 
 **The proof compares dependency trees.** The old project is installed as npm would (with `npm ci`
 when it has a lockfile) and its tree written; the new project's `node:tree` must match it byte for

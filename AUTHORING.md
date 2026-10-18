@@ -160,12 +160,14 @@ one of its rows.
 - **`run` reads `package.json` with `daukle.read` and installs its dependencies into
   `migrate-probe/`** with `--ignore-scripts`, to learn which direct dependency provides each command
   a script runs and which of `package-lock.json`, `npm-shrinkwrap.json`, `node_modules`, `.npmrc`,
-  `.nvmrc` and `.node-version` exist. Existence is asked of node because `daukle.read` raises on a
-  missing file and the sandbox has no `pcall`.
+  `.nvmrc`, `.node-version`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock` and `bun.lockb` exist.
+  Existence is asked of node because `daukle.read` raises on a missing file and the sandbox has no
+  `pcall`. The install runs with `check = false`, so one that fails is a single blocker carrying
+  npm's first error lines, and nothing after it runs.
 - **Nothing is dropped silently.** An unknown field, every `engines` key other than `node`, a
-  non-map `engines`, a dependency name or a `main` that `lib/settings.lua` would refuse, and the
-  files above other than `package-lock.json` and `node_modules` are blockers. Metadata that no build
-  reads is dropped by name. `package-lock.json` and `node_modules` are owned and move aside.
+  non-map `engines`, a dependency name or a `main` that `lib/settings.lua` would refuse, a
+  `workspace:` or `catalog:` range, and the files above other than `package-lock.json` and
+  `node_modules` are blockers. Metadata that no build reads is dropped by name. `package-lock.json` and `node_modules` are owned and move aside.
 - **A script becomes steps by a closed grammar.** Whitespace-separated words joined by `&&`; a
   newline, a quote that is not a whole word, any shell character in `lib/command_line.lua` and its
   shell builtins and keywords refuse the script. Single quotes are read with their `sh` meaning on
