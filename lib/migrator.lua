@@ -16,7 +16,8 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const exists = {};
-for (const name of ["package-lock.json", "npm-shrinkwrap.json", "node_modules", ".npmrc", ".nvmrc", ".node-version"]) {
+for (const name of ["package-lock.json", "npm-shrinkwrap.json", "node_modules", ".npmrc", ".nvmrc", ".node-version",
+                    "yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb"]) {
   exists[name] = existsSync(name);
 }
 
@@ -147,6 +148,11 @@ local NESTED_PACKAGE = "is a package.json below the package root, which node rea
 local NESTED_ROW = "2. Module resolution: a nested `package.json` below the package root"
 local UNRESOLVED_ROW = "3. Dependencies: the declared dependencies do not resolve"
 
+local FOREIGN_LOCKFILE = "pins this project's dependencies for another package manager, and the"
+                         .. " migration would install with npm and drop those pins"
+local FOREIGN_LOCKFILE_ROW = "4. Install, lockfile and registry configuration: another package"
+                             .. " manager's lockfile (`yarn.lock`, `pnpm-lock.yaml`, `bun.lock`, `bun.lockb`)"
+
 local REFUSED_FILES = {
   { name = "npm-shrinkwrap.json", why = NPM_CONFIGURATION,
     row = "4. Install, lockfile and registry configuration: a committed `package-lock.json` or `npm-shrinkwrap.json`" },
@@ -154,6 +160,10 @@ local REFUSED_FILES = {
     row = "4. Install, lockfile and registry configuration: a project `.npmrc`: scoped registries, `_authToken`, `${VAR}`" },
   { name = ".nvmrc", why = VERSION_MANAGER, row = "1. The runtime" },
   { name = ".node-version", why = VERSION_MANAGER, row = "1. The runtime" },
+  { name = "yarn.lock", why = FOREIGN_LOCKFILE, row = FOREIGN_LOCKFILE_ROW },
+  { name = "pnpm-lock.yaml", why = FOREIGN_LOCKFILE, row = FOREIGN_LOCKFILE_ROW },
+  { name = "bun.lock", why = FOREIGN_LOCKFILE, row = FOREIGN_LOCKFILE_ROW },
+  { name = "bun.lockb", why = FOREIGN_LOCKFILE, row = FOREIGN_LOCKFILE_ROW },
 }
 
 local function run(context)
