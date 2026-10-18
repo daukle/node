@@ -186,7 +186,11 @@ variable `DAUKLE_NODE_LINK=copy` forces that, and is the only way to make a link
 a `node_modules` link pointing elsewhere (naming that two node toolchains cannot share one package
 root, when it points into another instance), and an edited root `package.json`. The migrator
 (`ROOT_ENTRIES`, `lib/migrator.lua`) blocks a project whose `.gitignore` files, read from the project
-root down to the package root, do not ignore `node_modules/` and `/package.json`.
+root down to the package root, do not ignore `node_modules` and `/package.json`. It accepts only
+`node_modules`, `**/node_modules`, `/node_modules` and `/<dir>/node_modules` from an ancestor, never
+a form ending in a slash: git classifies a POSIX symlink as a file, so a directory-only pattern does
+not ignore it (measured in WSL; Git for Windows treats a junction as a directory, so the Windows
+runners cannot see this). `git-ignores-the-placed-root-entries` asks git itself.
 
 **`node:tree` does not place them.** Core runs the migration proof (`<instance>:tree`) before it moves
 the old `package.json` aside (`fr_migrate_finish`, `src/migrate/migrate_finish.c`), so the proof

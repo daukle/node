@@ -45,33 +45,38 @@ findNested("");
 nested.sort();
 
 const ignored = { node_modules: false, package_json: false };
-function ignoresNodeModules(pattern, rel) {
-  return ["node_modules", "node_modules/", "**/node_modules", "**/node_modules/",
-          "/" + rel + "node_modules", "/" + rel + "node_modules/"].includes(pattern);
-}
-function ignoresPackageJson(pattern, rel) {
-  return ["package.json", "**/package.json", "/" + rel + "package.json"].includes(pattern);
+/** @implNote no accepted form ends in a slash: git classifies a POSIX symlink as a file, so a directory-only pattern does not ignore the link node:install places (Git for Windows treats a junction as a directory, which hides this there). */
+const ROOT_ENTRIES = [
+  { fact: "node_modules", name: "node_modules",
+    forms: (prefixFromIgnoreFile) => ["node_modules", "**/node_modules", "/" + prefixFromIgnoreFile + "node_modules"] },
+  { fact: "package_json", name: "package.json",
+    forms: (prefixFromIgnoreFile) => ["package.json", "**/package.json", "/" + prefixFromIgnoreFile + "package.json"] },
+];
+function mayUnignore(pattern, entry, prefixFromIgnoreFile) {
+  return entry.forms(prefixFromIgnoreFile).some((form) => pattern === form || pattern === form + "/");
 }
 function readIgnoreLines(path) {
   try { return readFileSync(path, "utf8").split("\n"); }
   catch (error) { if (error.code === "ENOENT") return []; throw error; }
 }
-function applyIgnore(path, rel) {
+function applyIgnore(path, prefixFromIgnoreFile) {
   for (const raw of readIgnoreLines(path)) {
     const line = raw.trim();
     if (line === "" || line.startsWith("#")) continue;
     const negated = line.startsWith("!");
     const pattern = negated ? line.slice(1) : line;
-    if (ignoresNodeModules(pattern, rel)) ignored.node_modules = !negated;
-    if (ignoresPackageJson(pattern, rel)) ignored.package_json = !negated;
+    for (const entry of ROOT_ENTRIES) {
+      if (negated && mayUnignore(pattern, entry, prefixFromIgnoreFile)) ignored[entry.fact] = false;
+      else if (!negated && entry.forms(prefixFromIgnoreFile).includes(pattern)) ignored[entry.fact] = true;
+    }
   }
 }
 const depth = (process.argv[2] ?? "").split("/").filter(Boolean).length;
 const segments = process.cwd().split(/[\\/]/).filter(Boolean);
 try {
   for (let level = depth; level >= 0; level--) {
-    const rel = level === 0 ? "" : segments.slice(segments.length - level).join("/") + "/";
-    applyIgnore("../".repeat(level) + ".gitignore", rel);
+    const prefixFromIgnoreFile = level === 0 ? "" : segments.slice(segments.length - level).join("/") + "/";
+    applyIgnore("../".repeat(level) + ".gitignore", prefixFromIgnoreFile);
   }
 } catch {
   ignored.node_modules = false;
@@ -182,7 +187,7 @@ local FOREIGN_LOCKFILE_ROW = "4. Install, lockfile and registry configuration: a
 
 local ROOT_ENTRIES_ROW = "2. Module resolution: a tool that resolves `node_modules` or reads `package.json` itself"
 local ROOT_ENTRIES = {
-  { fact = "node_modules", line = "node_modules/" },
+  { fact = "node_modules", line = "node_modules" },
   { fact = "package_json", line = "/package.json" },
 }
 
