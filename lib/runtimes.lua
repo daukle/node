@@ -145,4 +145,10 @@ local function for_host(request)
   }
 end
 
-return { for_host = for_host, floor = text_of(FLOOR) }
+local function pinned()
+  local out = {}
+  for index = 1, #RELEASES do out[index] = RELEASES[index].version end
+  return out
+end
+
+return { for_host = for_host, floor = text_of(FLOOR), pinned = pinned }

@@ -262,5 +262,25 @@ for case_dir in "$root"/test/cases/*/; do
   run_case "${case_dir%/}"
 done
 
+# Pure Lua, run inside daukle through a staged plugin that requires the real
+# lib/, because the sandbox is the only Lua these modules ever run in.
+run_unit() {
+  label=unit
+  sandbox="$work/unit"
+  mkdir -p "$sandbox/plugins/unit"
+  cp "$root/test/unit/plugin.lua" "$sandbox/plugins/unit/plugin.lua"
+  cp -R "$root/test/unit/tests" "$sandbox/plugins/unit/tests"
+  cp -R "$root/lib" "$sandbox/plugins/unit/lib"
+  printf 'schema = 1\nproject = "daukle/node-unit"\nversion = "1.0.0"\n\n[modules]\n\n[plugins]\nunit = "./plugins/unit"\n\n[toolchains.unit]\n' \
+    > "$sandbox/daukle.toml"
+  if (cd "$sandbox" && "$daukle" unit:test >stdout.txt 2>stderr.txt); then
+    passed=$((passed + 1))
+  else
+    fail unit "$(sed -n '1,60p' "$sandbox/stderr.txt")"
+  fi
+}
+
+run_unit
+
 echo "$passed passed, $failed failed, $skipped skipped"
 [ "$failed" -eq 0 ]
