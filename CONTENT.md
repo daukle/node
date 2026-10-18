@@ -49,7 +49,8 @@ and watched go red in this repository's own suite.
 the package root, the instance's `dir` or the project root, so a relative path in a module means what
 it meant under npm. The key `type` (`"module"` or `"commonjs"`) gives the project's own `.js` files
 the module system it declares, through the resolver, because node never sees the project's own
-`package.json`. `AUTHORING.md` holds the mechanism and the one deprecated node API it needs.
+`package.json`. It overrides a nested `package.json`'s `type` below the package root, a deliberate
+difference from npm, and `daukle migrate` blocks a project that has one. `AUTHORING.md` holds the mechanism and the one deprecated node API it needs.
 
 ## Migrating from npm
 

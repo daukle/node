@@ -10,7 +10,7 @@ local PROBE_NAME = "__daukle_probe__.mjs"
      blocker in core. The bins are read from the probe's own install so that
      the answer is npm's layout, not a guess from names. ]]
 local PROBE = [==[
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -19,6 +19,21 @@ const exists = {};
 for (const name of ["package-lock.json", "npm-shrinkwrap.json", "node_modules", ".npmrc", ".nvmrc", ".node-version"]) {
   exists[name] = existsSync(name);
 }
+
+const nested = [];
+function findNested(directory) {
+  for (const entry of readdirSync(directory || ".", { withFileTypes: true })) {
+    const path = directory ? directory + "/" + entry.name : entry.name;
+    if (entry.isDirectory()) {
+      if (entry.name.startsWith(".") || entry.name === "node_modules" || entry.name === "build") continue;
+      findNested(path);
+    } else if (directory && entry.name === "package.json") {
+      nested.push(path);
+    }
+  }
+}
+findNested("");
+nested.sort();
 const own = JSON.parse(readFileSync(join(here, "package.json"), "utf8"));
 const bins = {};
 for (const name of Object.keys({ ...own.dependencies, ...own.devDependencies })) {
@@ -31,7 +46,7 @@ for (const name of Object.keys({ ...own.dependencies, ...own.devDependencies }))
     : Object.keys(map ? manifest.bin : {});
   for (const command of commands) (bins[command] ??= []).push({ name, map });
 }
-process.stdout.write(JSON.stringify({ exists, bins }));
+process.stdout.write(JSON.stringify({ exists, bins, nested }));
 ]==]
 
 local function within(dir, name)
@@ -98,6 +113,11 @@ local NPM_CONFIGURATION = "configures npm in a way this toolchain does not carry
 local VERSION_MANAGER = "names a node version for a version manager, which this toolchain never"
                         .. " reads beside the version it writes"
 
+local NESTED_PACKAGE = "is a package.json below the package root, which node reads for the format"
+                       .. " and resolution of the files under it, and which the toolchain's"
+                       .. " declared type would override"
+local NESTED_ROW = "2. Module resolution: a nested `package.json` below the package root"
+
 local REFUSED_FILES = {
   { name = "npm-shrinkwrap.json", why = NPM_CONFIGURATION,
     row = "4. Install, lockfile and registry configuration: a committed `package-lock.json` or `npm-shrinkwrap.json`" },
@@ -120,6 +140,10 @@ local function run(context)
       blockers[#blockers + 1] = { construct = refused.name, where = within(context.dir, refused.name),
                                   why = refused.why, surface = "NPM-SURFACE.md: " .. refused.row }
     end
+  end
+  for _, path in ipairs(facts.nested) do
+    blockers[#blockers + 1] = { construct = path, where = within(context.dir, path), why = NESTED_PACKAGE,
+                                surface = "NPM-SURFACE.md: " .. NESTED_ROW }
   end
   local owned = { where }
   if facts.exists["package-lock.json"] then owned[#owned + 1] = within(context.dir, "package-lock.json") end

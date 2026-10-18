@@ -129,6 +129,12 @@ run_migrate_case() {
   fi
   cat "$sandbox/stdout.txt" "$sandbox/stderr.txt" > "$sandbox/both.txt"
   grep_clauses_in "$sandbox/both.txt" "$case_dir/expect-output.txt" || return 1
+  if [ -f "$case_dir/expect-absent.txt" ]; then
+    while IFS= read -r absent || [ -n "$absent" ]; do
+      [ -z "$absent" ] && continue
+      grep -qF "$absent" "$sandbox/both.txt" && { fail "$label" "the output carries what it must not: $absent"; return 1; }
+    done < "$case_dir/expect-absent.txt"
+  fi
   grep_clauses_in "$sandbox/daukle.toml" "$case_dir/expect-manifest.txt" || return 1
   if [ -f "$case_dir/expect-gone.txt" ]; then
     while IFS= read -r gone || [ -n "$gone" ]; do
