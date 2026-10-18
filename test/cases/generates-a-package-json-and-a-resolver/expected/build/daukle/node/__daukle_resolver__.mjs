@@ -1,4 +1,5 @@
-import { createRequire, registerHooks } from "node:module";
+import Module, { createRequire, registerHooks } from "node:module";
+import { readFileSync } from "node:fs";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { dirname, join, resolve as resolvePath } from "node:path";
 
@@ -8,6 +9,25 @@ const asIfImportedFrom = pathToFileURL(anchor).href;
 const requireFromDerived = createRequire(anchor);
 const installedUnder = pathToFileURL(join(here, "node_modules")).href + "/";
 const projectUnder = pathToFileURL(resolvePath(here, "..", "..", "..")).href + "/";
+const projectFormat = null;
+
+function isProjectJavaScript(url) {
+  return projectFormat !== null && url.startsWith(projectUnder) && !url.startsWith(installedUnder)
+    && !url.includes("/node_modules/") && url.endsWith(".js");
+}
+
+const loadJavaScriptNatively = Module._extensions[".js"];
+
+function compileAsCommonJs(module, filename) {
+  module._compile(readFileSync(filename, "utf8"), filename, "commonjs");
+}
+
+if (projectFormat === "commonjs") {
+  Module._extensions[".js"] = function (module, filename) {
+    if (isProjectJavaScript(pathToFileURL(filename).href)) return compileAsCommonJs(module, filename);
+    return loadJavaScriptNatively(module, filename);
+  };
+}
 
 function isBare(specifier) {
   if (specifier === "") return false;
@@ -48,6 +68,10 @@ if (!inheritedOptions) {
 let resolving = false;
 
 registerHooks({
+  load(url, context, nextLoad) {
+    if (isProjectJavaScript(url)) return nextLoad(url, { ...context, format: projectFormat });
+    return nextLoad(url, context);
+  },
   resolve(specifier, context, nextResolve) {
     if (resolving || !isBare(specifier) || !belongsToThisProject(context.parentURL)) {
       return nextResolve(specifier, context);

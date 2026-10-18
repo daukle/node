@@ -1,0 +1,2 @@
+scripts."a:b" in toolchains.node and scripts."a.b" in toolchains.node-web
+are different scripts and the same daukle task "a.b"

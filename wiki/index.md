@@ -16,6 +16,20 @@ entry = "src/index.mjs"
 ```
 
 `daukle node:run` runs the `entry`, and `daukle node:install` installs the dependencies.
+`daukle node:tree` writes the installed dependency tree, one `<path> <name>@<version>` line per
+package, sorted, to `build/daukle/node/dependency-tree.txt` and to the terminal.
+
+| key | meaning |
+| --- | --- |
+| `version` | which node daukle runs: an exact version or `>=`, never below `22.15.0`. Required |
+| `entry` | the module `node:run` runs. Optional; `node:run` needs it when no script is declared |
+| `scripts` | a script per task, below |
+| `packages`, `devPackages` | package name to version range |
+| `type` | `"module"` or `"commonjs"`: the module system of your own `.js` files, as `type` in a `package.json`. Unset forces nothing. It overrides a nested `package.json`'s own `type` below the package root, which npm would honour: a deliberate difference, and `daukle migrate` blocks such a file rather than override it, searching every directory but `node_modules`, `.git` and `build/daukle` |
+
+A module of yours, run by `node:run` or a script, has the package root as its working directory: the
+directory of the instance (`dir`), or the project root. A relative path in a module means what it
+meant under npm. Only `node:install` and `node:tree` work in the generated directory.
 
 ## A script per task, instead of one entry point
 
@@ -42,10 +56,56 @@ one of:
 
 **A `:` in a script name becomes a `.` in the task name**, because a task name holds one colon and
 that one names the toolchain. The npm script keeps its own spelling; only the task is mapped. Two
-scripts that would map to the same task name are refused, naming both.
+scripts that would map to the same task name are refused, naming both. `install`, `run` and `tree`
+are not script names, because `node:install`, `node:run` and `node:tree` hold them.
 
 **`entry` is only required when you declare no scripts.** With scripts and no `entry`, `node:run`
 tells you which script tasks exist instead.
+
+## Migrating from npm
+
+`daukle migrate` turns a project with a `package.json` into this toolchain, all or nothing: if a
+single thing cannot be carried over exactly, nothing is written and the report names it and its row
+in `NPM-SURFACE.md` (in `daukle/docs`), which is the list of what npm and Node can do that this
+toolchain cannot.
+
+**What migrates**
+
+- `dependencies` and `devDependencies`, as `packages` and `devPackages`.
+- `engines.node`, as `version`: the newest pinned node that satisfies the range. With none, the
+  newest pinned node.
+- `type`, as `type`.
+- `main`, as `entry`, when the project declares no scripts.
+- `scripts` made of `node <file> <args>`, `npm run <name>` (and `npm test`, `start`, `stop`,
+  `restart`) of a declared script, and `<command> <args>` where exactly one direct dependency
+  provides the command, joined by `&&`.
+- Metadata that no build reads: `name`, `version`, `description`, `license`, `author`,
+  `contributors`, `keywords`, `repository`, `homepage`, `bugs`, `private`, `funding`.
+- A `package-lock.json` and `node_modules`, which move aside.
+
+**What blocks**
+
+- A shell: a pipe, `||`, `VAR=value`, a glob, a redirect, a line break, a quote that is not a whole
+  word, and builtins and keywords such as `cd`, `rm`, `echo`, `exec`, `time`, `exit`, `if`, `for`.
+- `npx`, `pnpm`, `yarn`, `bun`, `deno`, `node` followed by a flag, and any other `npm` verb.
+- A command no direct dependency provides, or two do.
+- A dependency on a local path: `file:`, `link:`, or a path such as `./lib`, `../lib`, `/abs` or a
+  `.tgz` file.
+- A `package.json` below the package root, in any directory but `node_modules`, `.git` and the
+  derived `build/daukle`, and a directory that search cannot list.
+- Lifecycle scripts, and a `pre<x>` or `post<x>` beside an `<x>`.
+- `workspaces`, `overrides`, `peerDependencies`, `optionalDependencies`, the project's own `bin`,
+  `exports`, `imports`, `files`, `publishConfig`, `packageManager` and the other fields
+  `NPM-SURFACE.md` records absent, and any field the migrator does not know.
+- Every `engines` key other than `node`.
+- An `npm-shrinkwrap.json`, `.npmrc`, `.nvmrc` or `.node-version`.
+
+**The proof compares dependency trees.** The old project is installed as npm would (with `npm ci`
+when it has a lockfile) and its tree written; the new project's `node:tree` must match it byte for
+byte. Because a committed lockfile is refused, a project whose lockfile pins older versions than its
+ranges now resolve to fails the proof: the report says the build differs and gives both digests, and
+both trees are printed so you can compare them. Run `npm update` first to migrate what you would get
+today.
 
 ## `node` and `npm` are two halves of one language
 

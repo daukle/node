@@ -2,7 +2,7 @@
      reachable. A package.json carries a scripts map and this toolchain modelled
      one "entry", so a project with two of them had one task. ]]
 
-local LIFECYCLE_TASKS = { install = true, run = true }
+local LIFECYCLE_TASKS = { install = true, run = true, tree = true }
 
 local STEP_KINDS = { module = true, bin = true, script = true }
 
@@ -16,21 +16,27 @@ local function task_name_of(script_name)
   return (string.lower((string.gsub(script_name, ":", "."))))
 end
 
-local function checked_script_name(name)
+local function task_name_problem(name)
   if type(name) ~= "string" or name == "" then
-    error('every key of "scripts" names a script, and "' .. tostring(name) .. '" is not a name', 0)
+    return 'every key of "scripts" names a script, and "' .. tostring(name) .. '" is not a name'
   end
   local task = task_name_of(name)
   if string.match(task, "^[%l%d%.%_%-]+$") == nil then
-    error(string.format('"%s" is a script this toolchain cannot name a task after: a task name is'
-                        .. ' lowercase letters, digits, ".", "_" and "-", and a ":" becomes a "."'
-                        .. ' , which leaves "%s"', name, task), 0)
+    return string.format('"%s" is a script this toolchain cannot name a task after: a task name is'
+                         .. ' lowercase letters, digits, ".", "_" and "-", and a ":" becomes a "."'
+                         .. ' , which leaves "%s"', name, task)
   end
   if LIFECYCLE_TASKS[task] then
-    error(string.format('a script may not be called "%s": "node:%s" is a lifecycle verb this'
-                        .. ' toolchain declares itself', name, task), 0)
+    return string.format('a script may not be called "%s": "node:%s" is a lifecycle verb this'
+                         .. ' toolchain declares itself', name, task)
   end
-  return task
+  return nil
+end
+
+local function checked_script_name(name)
+  local problem = task_name_problem(name)
+  if problem ~= nil then error(problem, 0) end
+  return task_name_of(name)
 end
 
 local function checked_args(args, where)
@@ -181,14 +187,37 @@ local function read(config)
   return out
 end
 
---- The names alone, for the chunk that registers one task each. It takes a
---- parsed document rather than a toolchain context, because registration
---- happens before any context exists.
-local function task_scripts(document)
-  local toolchains = document.toolchains
-  local config = toolchains ~= nil and toolchains.node or nil
-  if type(config) ~= "table" then return {} end
-  return read(config)
+local function is_node_instance(name, config)
+  if type(config) ~= "table" then return false end
+  if config.toolchain ~= nil then return config.toolchain == "node" end
+  return name == "node"
 end
 
-return { read = read, task_scripts = task_scripts, task_name_of = task_name_of }
+--- The union over every instance of this toolchain, because a plugin's tasks
+--- are declared once and core repeats them per instance. It takes a parsed
+--- document rather than a toolchain context, because registration happens
+--- before any context exists.
+local function task_scripts(document)
+  local toolchains = document.toolchains
+  if type(toolchains) ~= "table" then return {} end
+  local by_task = {}
+  for _, instance in ipairs(sorted_names(toolchains)) do
+    if is_node_instance(instance, toolchains[instance]) then
+      for _, script in ipairs(read(toolchains[instance])) do
+        local first = by_task[script.task]
+        if first ~= nil and first.script.name ~= script.name then
+          error(string.format('scripts."%s" in toolchains.%s and scripts."%s" in toolchains.%s are'
+                              .. ' different scripts and the same daukle task "%s"', first.script.name,
+                              first.instance, script.name, instance, script.task), 0)
+        end
+        by_task[script.task] = by_task[script.task] or { script = script, instance = instance }
+      end
+    end
+  end
+  local out = {}
+  for _, task in ipairs(sorted_names(by_task)) do out[#out + 1] = by_task[task].script end
+  return out
+end
+
+return { read = read, task_scripts = task_scripts, task_name_of = task_name_of,
+         task_name_problem = task_name_problem }

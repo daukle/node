@@ -8,7 +8,8 @@ local BIN_RUNNER_NAME = "__daukle_bin__.mjs"
      accept a path to a file that does not exist, and it is only there to name
      the directory resolution starts from. ]]
 local RESOLVER = [==[
-import { createRequire, registerHooks } from "node:module";
+import Module, { createRequire, registerHooks } from "node:module";
+import { readFileSync } from "node:fs";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { dirname, join, resolve as resolvePath } from "node:path";
 
@@ -18,6 +19,25 @@ const asIfImportedFrom = pathToFileURL(anchor).href;
 const requireFromDerived = createRequire(anchor);
 const installedUnder = pathToFileURL(join(here, "node_modules")).href + "/";
 const projectUnder = pathToFileURL(resolvePath(here, "..", "..", "..")).href + "/";
+const projectFormat = __DAUKLE_TYPE__;
+
+function isProjectJavaScript(url) {
+  return projectFormat !== null && url.startsWith(projectUnder) && !url.startsWith(installedUnder)
+    && !url.includes("/node_modules/") && url.endsWith(".js");
+}
+
+const loadJavaScriptNatively = Module._extensions[".js"];
+
+function compileAsCommonJs(module, filename) {
+  module._compile(readFileSync(filename, "utf8"), filename, "commonjs");
+}
+
+if (projectFormat === "commonjs") {
+  Module._extensions[".js"] = function (module, filename) {
+    if (isProjectJavaScript(pathToFileURL(filename).href)) return compileAsCommonJs(module, filename);
+    return loadJavaScriptNatively(module, filename);
+  };
+}
 
 function isBare(specifier) {
   if (specifier === "") return false;
@@ -58,6 +78,10 @@ if (!inheritedOptions) {
 let resolving = false;
 
 registerHooks({
+  load(url, context, nextLoad) {
+    if (isProjectJavaScript(url)) return nextLoad(url, { ...context, format: projectFormat });
+    return nextLoad(url, context);
+  },
   resolve(specifier, context, nextResolve) {
     if (resolving || !isBare(specifier) || !belongsToThisProject(context.parentURL)) {
       return nextResolve(specifier, context);
@@ -74,6 +98,11 @@ registerHooks({
   },
 });
 ]==]
+
+local function resolver_for(project_type)
+  local literal = project_type == nil and "null" or ('"' .. project_type .. '"')
+  return (string.gsub(RESOLVER, "__DAUKLE_TYPE__", literal))
+end
 
 --[[ @implNote an npm bin shim is nothing but "<node> <package>/<bin field>",
      written three times on Windows (sh, .cmd, .ps1) and once as a symlink
@@ -134,5 +163,6 @@ return {
   RESOLVER_NAME = RESOLVER_NAME,
   BIN_RUNNER_NAME = BIN_RUNNER_NAME,
   RESOLVER = RESOLVER,
+  resolver_for = resolver_for,
   BIN_RUNNER = BIN_RUNNER,
 }

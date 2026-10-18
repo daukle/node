@@ -1,0 +1,5 @@
+scripts/package.json
+tools/package.json
+build/out/package.json
+.github/x/package.json
+2. Module resolution: a nested `package.json` below the package root
