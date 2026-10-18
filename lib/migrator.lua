@@ -52,21 +52,23 @@ const ROOT_ENTRIES = [
   { fact: "package_json", name: "package.json",
     forms: (prefixFromIgnoreFile) => ["package.json", "**/package.json", "/" + prefixFromIgnoreFile + "package.json"] },
 ];
-function mayUnignore(pattern, entry, prefixFromIgnoreFile) {
-  return entry.forms(prefixFromIgnoreFile).some((form) => pattern === form || pattern === form + "/");
+/** @implNote any negation that could reach the entry, by a wildcard or by naming it, clears the fact without being matched: a false "ignored" lets generated files be committed, a false "not ignored" costs the user one line. */
+function mayUnignore(pattern, entry) {
+  return /[*?[]/.test(pattern) || pattern.includes(entry.name);
 }
 function readIgnoreLines(path) {
   try { return readFileSync(path, "utf8").split("\n"); }
   catch (error) { if (error.code === "ENOENT") return []; throw error; }
 }
+/** @implNote only the end of a line is trimmed, because git keeps leading whitespace as part of the pattern. */
 function applyIgnore(path, prefixFromIgnoreFile) {
   for (const raw of readIgnoreLines(path)) {
-    const line = raw.trim();
+    const line = raw.trimEnd();
     if (line === "" || line.startsWith("#")) continue;
     const negated = line.startsWith("!");
     const pattern = negated ? line.slice(1) : line;
     for (const entry of ROOT_ENTRIES) {
-      if (negated && mayUnignore(pattern, entry, prefixFromIgnoreFile)) ignored[entry.fact] = false;
+      if (negated && mayUnignore(pattern, entry)) ignored[entry.fact] = false;
       else if (!negated && entry.forms(prefixFromIgnoreFile).includes(pattern)) ignored[entry.fact] = true;
     }
   }

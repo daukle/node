@@ -190,7 +190,9 @@ root down to the package root, do not ignore `node_modules` and `/package.json`.
 `node_modules`, `**/node_modules`, `/node_modules` and `/<dir>/node_modules` from an ancestor, never
 a form ending in a slash: git classifies a POSIX symlink as a file, so a directory-only pattern does
 not ignore it (measured in WSL; Git for Windows treats a junction as a directory, so the Windows
-runners cannot see this). `git-ignores-the-placed-root-entries` asks git itself.
+runners cannot see this). `git-ignores-the-placed-root-entries` asks git itself. A negated line with
+a wildcard or the entry's name counts as un-ignoring it, and leading whitespace stays part of the
+pattern, as git keeps it: both fail closed.
 
 **`node:tree` does not place them.** Core runs the migration proof (`<instance>:tree`) before it moves
 the old `package.json` aside (`fr_migrate_finish`, `src/migrate/migrate_finish.c`), so the proof
