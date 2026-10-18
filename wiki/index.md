@@ -22,7 +22,7 @@ package, sorted, to `build/daukle/node/dependency-tree.txt` and to the terminal.
 | key | meaning |
 | --- | --- |
 | `version` | which node daukle runs: an exact version or `>=`, never below `22.15.0`. Required |
-| `entry` | the module `node:run` runs. Optional: required only when no script is declared |
+| `entry` | the module `node:run` runs. Optional; `node:run` needs it when no script is declared |
 | `scripts` | a script per task, below |
 | `packages`, `devPackages` | package name to version range |
 | `type` | `"module"` or `"commonjs"`: the module system of your own `.js` files, as `type` in a `package.json`. Unset forces nothing |

@@ -9,8 +9,9 @@ reading.
 
 **A plugin has no absolute path to the project, so `NODE_OPTIONS` cannot be built in Lua.**
 `context.root` is the literal string `"../../.."`, relative to the derived directory (for an
-instance with `dir = "web"` it is `"../../../web"`). The spec's section 7 has the plugin assemble `--import <resolver>` and hand it to
-`daukle.exec`'s `env`, and there is nothing to assemble it from.
+instance with `dir = "web"` it is `"../../../web"`). The spec's section 7 has the plugin
+assemble `--import <resolver>` and hand it to `daukle.exec`'s `env`, and there is nothing to
+assemble it from.
 
 **A relative `--import` is worse than no gate at all.** It is resolved against **each process's
 own** working directory, so an unrelated node started elsewhere under an inherited `NODE_OPTIONS`
@@ -22,8 +23,8 @@ it percent-encodes a space, so `NODE_OPTIONS` never needs quoting.
 So the resolver is delivered **twice, by two mechanisms**. `node:run` and every script step pass
 `--import <derived directory>/__daukle_resolver__.mjs` on the command line, as a path relative to
 the package root they run in, starting with `./` or `../` so it stays a relative URL rather than a
-bare specifier. The resolver then writes the absolute form into `process.env.NODE_OPTIONS` itself, from its own `import.meta.url`, which is how a descendant gets
-it. That is the spec's semantics with the one step the plugin could not take moved into the file
+bare specifier. The resolver then writes the absolute form into `process.env.NODE_OPTIONS` itself,
+from its own `import.meta.url`, which is how a descendant gets it. That is the spec's semantics with the one step the plugin could not take moved into the file
 that can take it.
 
 **`context.conditions` is not one shape per version, it is one shape per MODULE SYSTEM.** Measured
