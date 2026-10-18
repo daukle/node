@@ -1,0 +1,22 @@
+schema = 1
+project = "daukle/node-test"
+version = "1.0.0"
+
+[modules]
+
+[plugins]
+node = "./plugins/node"
+
+# jest 30 takes its rootDir from the nearest package.json and resolves through
+# unrs-resolver, which is native, so both root entries are needed.
+[toolchains.node]
+version = "22.15.0"
+
+  [toolchains.node.packages]
+  semver = "7.6.3"
+
+  [toolchains.node.devPackages]
+  jest = "30.2.0"
+
+  [toolchains.node.scripts]
+  test = { bin = "jest", args = [] }
