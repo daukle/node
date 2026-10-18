@@ -17,7 +17,20 @@ local SURFACE = {
   main = "2. Module resolution: the project's own `exports` and `main`, as offered to consumers",
   tarball = "3. Dependencies: a tarball URL holding `?`, `%` or `&`",
   local_path = "3. Dependencies: local paths, `file:`",
+  workspaces = "6. Workspaces: `workspaces`, each linked into the root `node_modules`",
 }
+
+local WORKSPACE_PROTOCOLS = {
+  { prefix = "workspace:", what = "the workspace protocol, which links a sibling package of a workspace" },
+  { prefix = "catalog:", what = "a pnpm catalog reference, which takes its range from the workspace's catalog" },
+}
+
+local function workspace_protocol_of(range)
+  for _, protocol in ipairs(WORKSPACE_PROTOCOLS) do
+    if string.sub(string.lower(range), 1, #protocol.prefix) == protocol.prefix then return protocol end
+  end
+  return nil
+end
 
 local ABSENT_FIELDS = {
   peerDependencies = "3. Dependencies: `peerDependencies`",
@@ -26,7 +39,7 @@ local ABSENT_FIELDS = {
   bundleDependencies = "3. Dependencies: `bundleDependencies`",
   bundledDependencies = "3. Dependencies: `bundleDependencies`",
   overrides = "3. Dependencies: `overrides`",
-  workspaces = "6. Workspaces: `workspaces`, each linked into the root `node_modules`",
+  workspaces = SURFACE.workspaces,
   bin = "7. Packing and publishing: the project's own `bin`",
   exports = SURFACE.main,
   imports = "2. Module resolution: the project's own `\"imports\"`, `#`-specifiers",
@@ -94,12 +107,17 @@ local function dependency_map(package, key, where, blockers)
   for _, name in ipairs(sorted_keys(map)) do
     local range = map[name]
     local name_problem = settings.package_name_problem(name)
+    local protocol = type(range) == "string" and workspace_protocol_of(range) or nil
     if name_problem ~= nil then
       blocker(blockers, key .. '."' .. name .. '"', where, name_problem, SURFACE.dependencies)
     elseif type(range) == "string" and is_local_path(range) then
       blocker(blockers, key .. '."' .. name .. '"', where, string.format('is "%s", a local path'
               .. ' npm would resolve against the generated package.json\'s directory rather than'
               .. ' this one', range), SURFACE.local_path)
+    elseif protocol ~= nil then
+      blocker(blockers, key .. '."' .. name .. '"', where, string.format('is "%s", %s, and this'
+              .. ' toolchain has no workspaces', range, protocol.what),
+              SURFACE.workspaces)
     elseif type(range) ~= "string"
            or not string.match(range, '^[%w%s%.%-%+%*|<>=~^%(%)/:#@]+$') then
       blocker(blockers, key .. '."' .. name .. '"', where,

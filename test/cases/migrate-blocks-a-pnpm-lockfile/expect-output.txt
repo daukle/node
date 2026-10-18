@@ -1,0 +1,2 @@
+pnpm-lock.yaml
+another package manager's lockfile
