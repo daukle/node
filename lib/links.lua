@@ -22,7 +22,7 @@ const MARKER_KEY = __DAUKLE_MARKER_KEY__;
 const MARKER_TEXT = __DAUKLE_MARKER_TEXT__;
 const PLACED_NAME = __DAUKLE_PLACED_NAME__;
 const COPY_MARKER = __DAUKLE_COPY_MARKER__;
-const LINK_REFUSALS = new Set(["EPERM", "ENOTSUP", "EINVAL"]);
+const LINK_REFUSALS = new Set(["EPERM", "ENOTSUP", "EOPNOTSUPP", "EINVAL"]);
 
 const windows = process.platform === "win32";
 const derived = resolve(".");
@@ -64,9 +64,8 @@ function modulesAction() {
   const entry = entryAt(rootModules);
   if (entry === null) return "place";
   if (entry.isSymbolicLink()) {
-    if (!existsSync(rootModules)) return "replace-link";
     const target = resolve(dirname(rootModules), withoutDevicePrefix(readlinkSync(rootModules)));
-    if (comparable(target) === comparable(derivedModules)) return "keep";
+    if (comparable(target) === comparable(derivedModules)) return existsSync(rootModules) ? "keep" : "replace-link";
     const shared = /(^|\/)build\/daukle\/[^/]+\/node_modules$/.test(target.split(sep).join("/"))
       ? ": two node toolchains cannot share one package root" : "";
     throw new Refusal(`"${shown(rootModules)}" links to "${shown(target)}", not to this`

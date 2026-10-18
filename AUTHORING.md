@@ -179,11 +179,11 @@ after `daukle clean`, is replaced. With the file and different bytes it is refus
 older generation after a manifest change is told from a hand edit.
 
 **`node_modules` is a junction on Windows (it needs no privilege) and a `"dir"` symlink elsewhere,**
-and it is always created, even when nothing is declared. It degrades to a marked copy on `EPERM`, `ENOTSUP` or `EINVAL`. The environment
+and it is always created, even when nothing is declared. It degrades to a marked copy on `EPERM`, `ENOTSUP`, `EOPNOTSUPP` or `EINVAL`. The environment
 variable `DAUKLE_NODE_LINK=copy` forces that, and is the only way to make a link fail on a CI runner.
 
 **It refuses, never replaces, what it did not place.** A real root `node_modules` or `package.json`,
-a `node_modules` link pointing elsewhere (naming that two node toolchains cannot share one package
+a `node_modules` link pointing elsewhere, dangling or not (naming that two node toolchains cannot share one package
 root, when it points into another instance), and an edited root `package.json`. The migrator
 (`ROOT_ENTRIES`, `lib/migrator.lua`) blocks a project whose `.gitignore` files, read from the project
 root down to the package root, do not ignore `node_modules` and `/package.json`. It accepts only

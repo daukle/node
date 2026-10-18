@@ -44,7 +44,7 @@ root, so `node:install` places them there, even when nothing is declared:
 | `node_modules` | a link into `build/daukle/<instance>/node_modules`: a junction on Windows, a directory symlink elsewhere |
 | `package.json` | a COPY of the generated file, never a link. Its first key is `"//"`, a sentence saying daukle generates it, and it carries the toolchain's `type` |
 
-Where a link is refused (`EPERM`, `ENOTSUP` or `EINVAL`), or `DAUKLE_NODE_LINK=copy` is set,
+Where a link is refused (`EPERM`, `ENOTSUP`, `EOPNOTSUPP` or `EINVAL`), or `DAUKLE_NODE_LINK=copy` is set,
 `node_modules` becomes a copy marked by a `.daukle-copy` file, and the next `node:install` replaces
 it. The bytes placed as `package.json` are kept in `build/daukle/<instance>/__daukle_placed__.json`,
 which is how an old copy is told from an edited one.
@@ -61,8 +61,9 @@ excludes file are not read.
 - a real `node_modules` or `package.json` sits at the package root that daukle did not place. Remove
   it: the packages are installed into `build/daukle/<instance>/node_modules`. A project with either,
   which `daukle/node` 2.0.x ignored, is refused from 2.1.0.
-- the root `node_modules` is a link pointing elsewhere. When it points into another instance's
-  `build/daukle/` the message says two node toolchains cannot share one package root.
+- the root `node_modules` is a link pointing elsewhere, even one whose target is missing. When it
+  points into another instance's `build/daukle/` the message says two node toolchains cannot share
+  one package root.
 - the root `package.json` was edited. `node:install` replaces it on every run, so move the change
   into `daukle.toml`.
 
