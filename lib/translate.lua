@@ -1,6 +1,7 @@
 local engines = daukle.require("lib/engines")
 local command_line = daukle.require("lib/command_line")
 local scripts = daukle.require("lib/scripts")
+local settings = daukle.require("lib/settings")
 
 local SURFACE = {
   dependencies = "3. Dependencies",
@@ -10,6 +11,9 @@ local SURFACE = {
   lifecycle = "5. Scripts: the project's own lifecycle scripts on install: `preinstall`, `prepare`",
   publishing = "7. Packing and publishing",
   engines = "1. The runtime",
+  engines_field = "1. The runtime: `engines.node` / `engines.npm` in the package",
+  module = "1. The runtime: `node <module>`",
+  type = "2. Module resolution: the project's own `\"type\"`",
   main = "2. Module resolution: the project's own `exports` and `main`, as offered to consumers",
   tarball = "3. Dependencies: a tarball URL holding `?`, `%` or `&`",
 }
@@ -73,7 +77,11 @@ local function dependency_map(package, key, where, blockers)
   local out, any = {}, false
   for _, name in ipairs(sorted_keys(map)) do
     local range = map[name]
-    if type(range) ~= "string" or not string.match(range, '^[%w%s%.%-%+%*|<>=~^%(%)/:#@]+$') then
+    local name_problem = settings.package_name_problem(name)
+    if name_problem ~= nil then
+      blocker(blockers, key .. '."' .. name .. '"', where, name_problem, SURFACE.dependencies)
+    elseif type(range) ~= "string"
+           or not string.match(range, '^[%w%s%.%-%+%*|<>=~^%(%)/:#@]+$') then
       blocker(blockers, key .. '."' .. name .. '"', where,
               "is a specifier this toolchain cannot write into its generated package.json",
               SURFACE.tarball)
@@ -165,7 +173,30 @@ local function entry_of(package, has_scripts, where, blockers)
     end
     return nil
   end
-  return (string.gsub(main, "^%./", ""))
+  local entry = string.gsub(main, "^%./", "")
+  if not settings.is_project_path(entry) then
+    blocker(blockers, '"main"', where, string.format('names "%s", which is not a module inside'
+            .. ' the project', main), SURFACE.module)
+    return nil
+  end
+  return entry
+end
+
+local function node_range(package, where, blockers)
+  local map = package.engines
+  if map == nil then return nil end
+  if type(map) ~= "table" or #map > 0 then
+    blocker(blockers, '"engines"', where, "is not a map of engine name to range",
+            SURFACE.engines_field)
+    return nil
+  end
+  for _, name in ipairs(sorted_keys(map)) do
+    if name ~= "node" then
+      blocker(blockers, "engines." .. name, where, "is a requirement the generated package.json"
+              .. " does not carry", SURFACE.engines_field)
+    end
+  end
+  return map.node
 end
 
 local function steps_in(step_or_steps)
@@ -192,15 +223,18 @@ local function package(text, where)
               .. " field it does not know is never dropped", nil)
     end
   end
-  local range = type(parsed.engines) == "table" and parsed.engines.node or nil
+  local range = node_range(parsed, where, blockers)
   local version, why = engines.newest_satisfying(range)
   if version == nil then blocker(blockers, "engines.node", where, why, SURFACE.engines) end
   config.version = version
   config.packages = dependency_map(parsed, "dependencies", where, blockers)
   config.devPackages = dependency_map(parsed, "devDependencies", where, blockers)
   if parsed.type ~= nil then
-    if parsed.type == "module" or parsed.type == "commonjs" then config.type = parsed.type
-    else blocker(blockers, '"type"', where, "is neither \"module\" nor \"commonjs\"", nil) end
+    if parsed.type == "module" or parsed.type == "commonjs" then
+      config.type = parsed.type
+    else
+      blocker(blockers, '"type"', where, "is neither \"module\" nor \"commonjs\"", SURFACE.type)
+    end
   end
   config.scripts = translated_scripts(parsed, where, blockers)
   config.entry = entry_of(parsed, config.scripts ~= nil, where, blockers)

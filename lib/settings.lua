@@ -35,13 +35,17 @@ local function climbs_out(path)
   return string.find(path, "/../", 1, true) ~= nil or string.match(path, "/%.%.$") ~= nil
 end
 
+local function is_project_path(path)
+  return path ~= "" and not climbs_out(path)
+end
+
 local function entry_of(config)
   local entry = config.entry
   if entry == nil then return nil end
   if type(entry) ~= "string" then
     error('"entry" must name a module as a path string, not a ' .. type(entry), 0)
   end
-  if entry == "" or climbs_out(entry) then
+  if not is_project_path(entry) then
     error(string.format('"entry" must name a module inside the project, and "%s" does not', entry), 0)
   end
   return entry
@@ -61,6 +65,15 @@ end
 
 local SCOPED = "^@[%w][%w%.%_%-]*/[%w][%w%.%_%-]*$"
 local PLAIN = "^[%w][%w%.%_%-]*$"
+
+local function package_name_problem(name)
+  if type(name) ~= "string"
+     or (string.match(name, PLAIN) == nil and string.match(name, SCOPED) == nil) then
+    return string.format('"%s" is not an npm package name: a name is "lodash" or "@scope/name"',
+                         tostring(name))
+  end
+  return nil
+end
 
 --[[ @implNote the generated package.json is written without a json escaper, so
      what could need escaping is refused at the edge instead. Every npm name and
@@ -95,11 +108,8 @@ local function checked_packages(config, key)
   end
   local names = {}
   for name, range in pairs(packages) do
-    if type(name) ~= "string"
-       or (string.match(name, PLAIN) == nil and string.match(name, SCOPED) == nil) then
-      error(string.format('"%s" is not an npm package name: a name is "lodash" or "@scope/name"',
-                          tostring(name)), 0)
-    end
+    local problem = package_name_problem(name)
+    if problem ~= nil then error(problem, 0) end
     checked_range(name, range, key)
     names[#names + 1] = name
   end
@@ -150,4 +160,6 @@ end
 return {
   read = read,
   package_json = package_json,
+  package_name_problem = package_name_problem,
+  is_project_path = is_project_path,
 }
