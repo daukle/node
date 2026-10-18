@@ -19,7 +19,7 @@ function isProjectJavaScript(url) {
 const loadJavaScriptNatively = Module._extensions[".js"];
 
 function compileAsCommonJs(module, filename) {
-  module._compile(readFileSync(filename, "utf8"), filename);
+  module._compile(readFileSync(filename, "utf8"), filename, "commonjs");
 }
 
 if (projectFormat === "commonjs") {
