@@ -45,22 +45,29 @@ end
      daukle GENERATES package.json, so the only way they can disagree is that
      the manifest changed, which is exactly when reconciling is right and
      refusing is wrong. ]]
+local function install_packages(context, spec)
+  local root, pick = provision_node(context, spec)
+  daukle.exec(root:tool(pick.node), { root:path(pick.npm), "install" })
+  return root, pick
+end
+
 daukle.task{
   name = "node:install",
   run = function(context)
     local spec = settings.read(context)
-    local root, pick = provision_node(context, spec)
-    daukle.exec(root:tool(pick.node), { root:path(pick.npm), "install" })
+    local root, pick = install_packages(context, spec)
     daukle.exec(root:tool(pick.node), { "./" .. links.SCRIPT_NAME, context.root })
   end,
 }
 
+--[[ @implNote the migration proof runs before core moves the old package.json
+     aside, so tree must not place the root entries and installs on its own
+     rather than depending on node:install. ]]
 daukle.task{
   name = "node:tree",
-  dependsOn = { "node:install" },
   run = function(context)
     local spec = settings.read(context)
-    local root, pick = provision_node(context, spec)
+    local root, pick = install_packages(context, spec)
     daukle.exec(root:tool(pick.node), { "./" .. tree.SCRIPT_NAME })
   end,
 }
