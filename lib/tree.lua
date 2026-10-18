@@ -16,21 +16,25 @@ function visit(directory, path) {
   let manifest;
   try {
     manifest = JSON.parse(readFileSync(join(directory, "package.json"), "utf8"));
-  } catch {
-    lines.push(`${path} unreadable`);
-    return;
+  } catch (error) {
+    throw new Error(`${path} is an installed package whose package.json cannot be read: ${error.message}`);
   }
   lines.push(`${path} ${manifest.name}@${manifest.version}`);
   walk(join(directory, "node_modules"), path + "/node_modules/");
 }
 
+function packageEntries(directory) {
+  return readdirSync(directory, { withFileTypes: true })
+    .filter((entry) => !entry.name.startsWith("."))
+    .filter((entry) => entry.isDirectory() || entry.isSymbolicLink());
+}
+
 function walk(modules, prefix) {
   if (!existsSync(modules)) return;
-  for (const entry of readdirSync(modules, { withFileTypes: true })) {
-    if (entry.name.startsWith(".")) continue;
+  for (const entry of packageEntries(modules)) {
     if (entry.name.startsWith("@")) {
-      for (const scoped of readdirSync(join(modules, entry.name))) {
-        visit(join(modules, entry.name, scoped), prefix + entry.name + "/" + scoped);
+      for (const scoped of packageEntries(join(modules, entry.name))) {
+        visit(join(modules, entry.name, scoped.name), prefix + entry.name + "/" + scoped.name);
       }
       continue;
     }
@@ -41,7 +45,7 @@ function walk(modules, prefix) {
 walk(join(here, "node_modules"), "");
 lines.sort();
 const text = lines.join("\n") + "\n";
-writeFileSync(join(here, "dependency-tree.txt"), text);
+writeFileSync(join(here, "]==] .. OUTPUT_NAME .. [==["), text);
 process.stdout.write(text);
 ]==]
 

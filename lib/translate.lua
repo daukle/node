@@ -16,6 +16,7 @@ local SURFACE = {
   type = "2. Module resolution: the project's own `\"type\"`",
   main = "2. Module resolution: the project's own `exports` and `main`, as offered to consumers",
   tarball = "3. Dependencies: a tarball URL holding `?`, `%` or `&`",
+  local_path = "3. Dependencies: local paths, `file:`",
 }
 
 local ABSENT_FIELDS = {
@@ -66,6 +67,21 @@ local function sorted_keys(map)
   return keys
 end
 
+--[[ @implNote the forms are npm-package-arg's: a protocol of file: or link:,
+     a leading ".", "/", "~/" or drive letter, or a tarball file name. npm
+     resolves each against the generated package.json's directory, not the
+     author's. ]]
+local function is_local_path(range)
+  local lowered = string.lower(range)
+  if string.match(lowered, "^file:") or string.match(lowered, "^link:") then return true end
+  if string.match(range, "^[%./]") or string.match(range, "^~/") or string.match(range, "^%a:") then
+    return true
+  end
+  return string.find(lowered, "://", 1, true) == nil
+         and (string.match(lowered, "%.tgz$") or string.match(lowered, "%.tar%.gz$")
+              or string.match(lowered, "%.tar$")) ~= nil
+end
+
 local function dependency_map(package, key, where, blockers)
   local map = package[key]
   if map == nil then return nil end
@@ -80,6 +96,10 @@ local function dependency_map(package, key, where, blockers)
     local name_problem = settings.package_name_problem(name)
     if name_problem ~= nil then
       blocker(blockers, key .. '."' .. name .. '"', where, name_problem, SURFACE.dependencies)
+    elseif type(range) == "string" and is_local_path(range) then
+      blocker(blockers, key .. '."' .. name .. '"', where, string.format('is "%s", a local path'
+              .. ' npm would resolve against the generated package.json\'s directory rather than'
+              .. ' this one', range), SURFACE.local_path)
     elseif type(range) ~= "string"
            or not string.match(range, '^[%w%s%.%-%+%*|<>=~^%(%)/:#@]+$') then
       blocker(blockers, key .. '."' .. name .. '"', where,
