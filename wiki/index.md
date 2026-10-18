@@ -92,7 +92,8 @@ toolchain cannot.
 - A dependency on a local path: `file:`, `link:`, or a path such as `./lib`, `../lib`, `/abs` or a
   `.tgz` file, and a `workspace:` or `catalog:` range.
 - Dependencies npm cannot install as declared, with no lockfile and no project `.npmrc`: a version
-  that does not exist, or a peer conflict. The blocker carries npm's own error.
+  that does not exist, or a peer conflict. The blocker carries npm's own error. An install that
+  fails for the host's reasons, such as an unreachable registry, is an error, not a blocker.
 - A `package.json` below the package root, in any directory but `node_modules`, `.git` and the
   derived `build/daukle`, and a directory that search cannot list.
 - Lifecycle scripts, and a `pre<x>` or `post<x>` beside an `<x>`.

@@ -162,12 +162,16 @@ one of its rows.
   a script runs and which of `package-lock.json`, `npm-shrinkwrap.json`, `node_modules`, `.npmrc`,
   `.nvmrc`, `.node-version`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock` and `bun.lockb` exist.
   Existence is asked of node because `daukle.read` raises on a missing file and the sandbox has no
-  `pcall`. The install runs with `check = false`, so one that fails is a single blocker carrying
-  npm's first error lines, and nothing after it runs.
+  `pcall`. The install's output is captured, so `daukle migrate` is silent while it runs. It runs
+  with `check = false`, and `lib/npm_errors.lua` reads npm's `npm error code` line: a resolution
+  code (`ETARGET`, `E404`, `ERESOLVE`, `EUNSUPPORTEDPROTOCOL`, `EINVALIDTAGNAME`, `E401`, `E403`)
+  is one blocker carrying npm's lines and its log path, beside the file blockers, with only the
+  bins step skipped. Any other code, or none, is the host's failure and a plugin error (exit 1).
 - **Nothing is dropped silently.** An unknown field, every `engines` key other than `node`, a
   non-map `engines`, a dependency name or a `main` that `lib/settings.lua` would refuse, a
   `workspace:` or `catalog:` range, and the files above other than `package-lock.json` and
-  `node_modules` are blockers. Metadata that no build reads is dropped by name. `package-lock.json` and `node_modules` are owned and move aside.
+  `node_modules` are blockers. Metadata that no build reads is dropped by name.
+  `package-lock.json` and `node_modules` are owned and move aside.
 - **A script becomes steps by a closed grammar.** Whitespace-separated words joined by `&&`; a
   newline, a quote that is not a whole word, any shell character in `lib/command_line.lua` and its
   shell builtins and keywords refuse the script. Single quotes are read with their `sh` meaning on
