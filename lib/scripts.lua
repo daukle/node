@@ -200,14 +200,22 @@ end
 local function task_scripts(document)
   local toolchains = document.toolchains
   if type(toolchains) ~= "table" then return {} end
-  local by_name = {}
-  for name, config in pairs(toolchains) do
-    if is_node_instance(name, config) then
-      for _, script in ipairs(read(config)) do by_name[script.name] = script end
+  local by_task = {}
+  for _, instance in ipairs(sorted_names(toolchains)) do
+    if is_node_instance(instance, toolchains[instance]) then
+      for _, script in ipairs(read(toolchains[instance])) do
+        local first = by_task[script.task]
+        if first ~= nil and first.script.name ~= script.name then
+          error(string.format('scripts."%s" in toolchains.%s and scripts."%s" in toolchains.%s are'
+                              .. ' different scripts and the same daukle task "%s"', first.script.name,
+                              first.instance, script.name, instance, script.task), 0)
+        end
+        by_task[script.task] = by_task[script.task] or { script = script, instance = instance }
+      end
     end
   end
   local out = {}
-  for _, name in ipairs(sorted_names(by_name)) do out[#out + 1] = by_name[name] end
+  for _, task in ipairs(sorted_names(by_task)) do out[#out + 1] = by_task[task].script end
   return out
 end
 
