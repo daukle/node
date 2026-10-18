@@ -8,4 +8,4 @@ version = "1.0.0"
 node = "./plugins/node"
 
 [toolchains.node]
-version = "22.15.0"
+version = "26.3.1"

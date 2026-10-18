@@ -61,6 +61,9 @@ end
 
 local function refuse_a_project_with_no_entry(spec)
   if spec.entry ~= nil then return end
+  if #spec.scripts == 0 then
+    error('this project declares no "entry", so "node:run" has no module to run', 0)
+  end
   local names = {}
   for index = 1, #spec.scripts do names[index] = "node:" .. spec.scripts[index].task end
   error('this project declares no "entry", so "node:run" does not name a module: set one, or run'

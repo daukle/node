@@ -35,16 +35,9 @@ local function climbs_out(path)
   return string.find(path, "/../", 1, true) ~= nil or string.match(path, "/%.%.$") ~= nil
 end
 
---[[ @implNote "entry" is required only when nothing else says what to run. A
-     project that declares scripts has named several things to run and has no
-     reason to elect one, so demanding an entry there would be demanding a
-     module it does not have; node:run names the scripts instead. ]]
-local function entry_of(config, declared_scripts)
+local function entry_of(config)
   local entry = config.entry
-  if entry == nil then
-    if #declared_scripts > 0 then return nil end
-    error('a node toolchain needs an "entry": the module "node:run" runs cannot be inferred', 0)
-  end
+  if entry == nil then return nil end
   if type(entry) ~= "string" then
     error('"entry" must name a module as a path string, not a ' .. type(entry), 0)
   end
@@ -132,7 +125,7 @@ local function read(context)
   local declared_scripts = scripts.read(config)
   return {
     version = version_of(context),
-    entry = entry_of(config, declared_scripts),
+    entry = entry_of(config),
     scripts = declared_scripts,
     packages = packages,
     package_ranges = package_ranges,

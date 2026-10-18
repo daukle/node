@@ -181,14 +181,28 @@ local function read(config)
   return out
 end
 
---- The names alone, for the chunk that registers one task each. It takes a
---- parsed document rather than a toolchain context, because registration
---- happens before any context exists.
+local function is_node_instance(name, config)
+  if type(config) ~= "table" then return false end
+  if config.toolchain ~= nil then return config.toolchain == "node" end
+  return name == "node"
+end
+
+--- The union over every instance of this toolchain, because a plugin's tasks
+--- are declared once and core repeats them per instance. It takes a parsed
+--- document rather than a toolchain context, because registration happens
+--- before any context exists.
 local function task_scripts(document)
   local toolchains = document.toolchains
-  local config = toolchains ~= nil and toolchains.node or nil
-  if type(config) ~= "table" then return {} end
-  return read(config)
+  if type(toolchains) ~= "table" then return {} end
+  local by_name = {}
+  for name, config in pairs(toolchains) do
+    if is_node_instance(name, config) then
+      for _, script in ipairs(read(config)) do by_name[script.name] = script end
+    end
+  end
+  local out = {}
+  for _, name in ipairs(sorted_names(by_name)) do out[#out + 1] = by_name[name] end
+  return out
 end
 
 return { read = read, task_scripts = task_scripts, task_name_of = task_name_of }
