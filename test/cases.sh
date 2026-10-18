@@ -41,25 +41,65 @@ stage_plugin() {
   cp -R "$root/lib" "$1/plugins/node/lib"
 }
 
+# On Windows python3 can be the WindowsApps stub that only opens the Store, so
+# a candidate counts only once it has run.
+working_python() {
+  for candidate in python3 python; do
+    command -v "$candidate" >/dev/null 2>&1 || continue
+    "$candidate" -c 'import sys' >/dev/null 2>&1 && { echo "$candidate"; return 0; }
+  done
+  return 1
+}
+
+# Port 0 lets the system pick, because a fixed port can fall in a range Windows
+# reserves for Hyper-V and refuses to bind.
+PLUGIN_SERVER='
+import functools, http.server, os, sys
+handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=sys.argv[1])
+server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+with open(sys.argv[2] + ".tmp", "w") as out:
+    out.write(str(server.server_port))
+os.replace(sys.argv[2] + ".tmp", sys.argv[2])
+server.serve_forever()
+'
+
 # The catalog's asset is pinned by url and sha256, and core takes only https or
 # loopback http for it, so the staged plugin is packed exactly as publish.yml
 # packs it and served from 127.0.0.1.
 serve_plugin() {
   [ -n "${catalog:-}" ] && return 0
-  python=$(command -v python3 || command -v python)
+  if [ -n "${server_broken:-}" ]; then
+    echo "skip $label: the plugin server did not start" >&2
+    skipped=$((skipped + 1))
+    return 1
+  fi
+  server_broken=1
+  python=$(working_python) || { fail "$label" "no python3 or python that runs"; return 1; }
   asset_dir="$work/asset"
   mkdir -p "$asset_dir"
-  (cd "$root" && tar -cf "$asset_dir/plugin.lua" plugin.lua lib/*.lua)
+  # COPYFILE_DISABLE and ustar keep macOS bsdtar from adding AppleDouble or pax
+  # members, and core's tar reader takes only regular files and directories.
+  (cd "$root" && COPYFILE_DISABLE=1 tar --format=ustar -cf "$asset_dir/plugin.lua" plugin.lua lib/*.lua)
   digest=$(sha256sum "$asset_dir/plugin.lua" 2>/dev/null | cut -d' ' -f1)
   [ -n "$digest" ] || digest=$(shasum -a 256 "$asset_dir/plugin.lua" | cut -d' ' -f1)
-  port=$((20000 + $$ % 20000))
-  "$python" -m http.server "$port" --bind 127.0.0.1 --directory "$asset_dir" >/dev/null 2>&1 &
+  port_file="$work/server-port"
+  rm -f "$port_file"
+  "$python" -c "$PLUGIN_SERVER" "$asset_dir" "$port_file" >"$work/server.log" 2>&1 &
   server=$!
   trap 'kill "$server" 2>/dev/null || true' EXIT
+  port=
   for _ in 1 2 3 4 5 6 7 8 9 10; do
-    curl -fsS "http://127.0.0.1:$port/plugin.lua" -o /dev/null 2>/dev/null && break
+    [ -s "$port_file" ] && port=$(cat "$port_file") &&
+      curl -fsS "http://127.0.0.1:$port/plugin.lua" -o /dev/null 2>/dev/null && break
+    port=
+    kill -0 "$server" 2>/dev/null || break
     sleep 1
   done
+  if [ -z "$port" ]; then
+    fail "$label" "the plugin server did not start, so no migrate case can run: $(cat "$work/server.log")"
+    return 1
+  fi
+  server_broken=
   catalog="$work/catalog.json"
   "$python" -c 'import json,sys; c=json.load(open(sys.argv[1])); c.update(id="node", asset={"url":sys.argv[2],"sha256":sys.argv[3]}); json.dump({"plugins":[c]}, open(sys.argv[4],"w"))' \
     "$root/catalog.json" "http://127.0.0.1:$port/plugin.lua" "$digest" "$catalog"
@@ -75,13 +115,16 @@ grep_clauses_in() {
 }
 
 run_migrate_case() {
-  serve_plugin
+  serve_plugin || return 1
   status=0
   (cd "$sandbox" && "$daukle" migrate --catalog "$catalog" >stdout.txt 2>stderr.txt) || status=$?
   wanted=$(cat "$case_dir/expect-exit.txt")
   if [ "$status" -ne "$wanted" ]; then
     fail "$label" "migrate exited $status, wanted $wanted"
-    sed -n '1,60p' "$sandbox/stdout.txt" "$sandbox/stderr.txt" >&2
+    echo "--- stdout" >&2
+    tail -n 30 "$sandbox/stdout.txt" >&2
+    echo "--- stderr" >&2
+    tail -n 30 "$sandbox/stderr.txt" >&2
     return 1
   fi
   cat "$sandbox/stdout.txt" "$sandbox/stderr.txt" > "$sandbox/both.txt"

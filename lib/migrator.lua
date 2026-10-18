@@ -85,7 +85,8 @@ local function probe(context, config)
                 .. json_object(config.packages) .. ', "devDependencies": '
                 .. json_object(config.devPackages) .. '}\n' }
   daukle.write{ path = "migrate-probe/" .. PROBE_NAME, text = PROBE }
-  daukle.exec(root:tool(pick.node), { root:path(pick.npm), "install", "--ignore-scripts" },
+  daukle.exec(root:tool(pick.node), { root:path(pick.npm), "install", "--ignore-scripts",
+                                      "--include=dev" },
               { cwd = derived(context, "migrate-probe") })
   local answer = daukle.exec(root:tool(pick.node),
                              { paths.climb_from(context.dir) .. derived(context, "migrate-probe/" .. PROBE_NAME) },
@@ -93,11 +94,17 @@ local function probe(context, config)
   return daukle.json_parse(answer.stdout)
 end
 
+local NPM_CONFIGURATION = "configures npm in a way this toolchain does not carry over"
+local VERSION_MANAGER = "names a node version for a version manager, which this toolchain never"
+                        .. " reads beside the version it writes"
+
 local REFUSED_FILES = {
-  ["npm-shrinkwrap.json"] = "4. Install, lockfile and registry configuration: a committed `package-lock.json` or `npm-shrinkwrap.json`",
-  [".npmrc"] = "4. Install, lockfile and registry configuration: a project `.npmrc`: scoped registries, `_authToken`, `${VAR}`",
-  [".nvmrc"] = "1. The runtime",
-  [".node-version"] = "1. The runtime",
+  { name = "npm-shrinkwrap.json", why = NPM_CONFIGURATION,
+    row = "4. Install, lockfile and registry configuration: a committed `package-lock.json` or `npm-shrinkwrap.json`" },
+  { name = ".npmrc", why = NPM_CONFIGURATION,
+    row = "4. Install, lockfile and registry configuration: a project `.npmrc`: scoped registries, `_authToken`, `${VAR}`" },
+  { name = ".nvmrc", why = VERSION_MANAGER, row = "1. The runtime" },
+  { name = ".node-version", why = VERSION_MANAGER, row = "1. The runtime" },
 }
 
 local function run(context)
@@ -108,11 +115,10 @@ local function run(context)
   end
   local facts = probe(context, translation.config)
   local blockers = translate.resolve_commands(translation.config, facts.bins, where)
-  for name, row in pairs(REFUSED_FILES) do
-    if facts.exists[name] then
-      blockers[#blockers + 1] = { construct = name, where = within(context.dir, name),
-                                  why = "configures npm in a way this toolchain does not carry over",
-                                  surface = "NPM-SURFACE.md: " .. row }
+  for _, refused in ipairs(REFUSED_FILES) do
+    if facts.exists[refused.name] then
+      blockers[#blockers + 1] = { construct = refused.name, where = within(context.dir, refused.name),
+                                  why = refused.why, surface = "NPM-SURFACE.md: " .. refused.row }
     end
   end
   local owned = { where }
