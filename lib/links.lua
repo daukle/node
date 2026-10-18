@@ -14,8 +14,8 @@ local COPY_MARKER = ".daukle-copy"
      used on Windows because it needs no privilege, and lstat reports one as a
      symbolic link whose readlink can carry a "\\?\" prefix. ]]
 local TEMPLATE = [==[
-import { cpSync, existsSync, lstatSync, readFileSync, readlinkSync, rmSync, symlinkSync,
-  writeFileSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync,
+  symlinkSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 const MARKER_KEY = __DAUKLE_MARKER_KEY__;
@@ -117,7 +117,9 @@ function linkModules() {
   }
 }
 
+/** @implNote npm creates no node_modules when nothing is declared, and the root entry needs one to resolve to or copy from. */
 function placeModules(action) {
+  mkdirSync(derivedModules, { recursive: true });
   if (action === "keep") return;
   if (action === "replace-link") rmSync(rootModules, { force: true });
   if (action === "replace-copy") rmSync(rootModules, { recursive: true, force: true });
