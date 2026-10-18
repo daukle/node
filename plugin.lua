@@ -10,6 +10,7 @@ local runners = daukle.require("lib/runners")
 local settings = daukle.require("lib/settings")
 local paths = daukle.require("lib/paths")
 local tree = daukle.require("lib/tree")
+local links = daukle.require("lib/links")
 
 daukle.toolchain{
   name = "node",
@@ -21,6 +22,7 @@ daukle.toolchain{
       [runners.RESOLVER_NAME] = runners.resolver_for(spec.type),
       [runners.BIN_RUNNER_NAME] = runners.BIN_RUNNER,
       [tree.SCRIPT_NAME] = tree.SCRIPT,
+      [links.SCRIPT_NAME] = links.SCRIPT,
     }
   end,
 }
@@ -43,21 +45,28 @@ end
      daukle GENERATES package.json, so the only way they can disagree is that
      the manifest changed, which is exactly when reconciling is right and
      refusing is wrong. ]]
+local function install_packages(context, spec)
+  local root, pick = provision_node(context, spec)
+  daukle.exec(root:tool(pick.node), { root:path(pick.npm), "install" })
+  return root, pick
+end
+
 daukle.task{
   name = "node:install",
   run = function(context)
     local spec = settings.read(context)
-    local root, pick = provision_node(context, spec)
-    daukle.exec(root:tool(pick.node), { root:path(pick.npm), "install" })
+    local root, pick = install_packages(context, spec)
+    daukle.exec(root:tool(pick.node), { "./" .. links.SCRIPT_NAME, context.root })
   end,
 }
 
+--[[ @implNote the migration proof runs before core moves the old package.json
+     aside, so tree installs on its own instead of depending on node:install ]]
 daukle.task{
   name = "node:tree",
-  dependsOn = { "node:install" },
   run = function(context)
     local spec = settings.read(context)
-    local root, pick = provision_node(context, spec)
+    local root, pick = install_packages(context, spec)
     daukle.exec(root:tool(pick.node), { "./" .. tree.SCRIPT_NAME })
   end,
 }

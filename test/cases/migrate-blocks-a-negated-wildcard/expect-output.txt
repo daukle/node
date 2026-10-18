@@ -1,0 +1,2 @@
+add the line node_modules
+add the line /package.json

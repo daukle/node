@@ -210,6 +210,60 @@ assert_root_is_clean() {
   return 0
 }
 
+# A junction is not a symbolic link to Git Bash's test -L, so a link is told
+# from an unmarked copy by whether a file written into a derived node_modules
+# shows through it.
+shows_a_derived_node_modules() {
+  modules=$1
+  for derived in "$sandbox"/build/daukle/*/node_modules; do
+    [ -d "$derived" ] || continue
+    probe="$derived/.daukle-probe"
+    : > "$probe"
+    shown=1
+    [ -e "$modules/.daukle-probe" ] && shown=0
+    rm -f "$probe"
+    [ "$shown" -eq 0 ] && return 0
+  done
+  return 1
+}
+
+is_a_placed_package_json() {
+  for generated in "$sandbox"/build/daukle/*/package.json; do
+    [ -f "$generated" ] && cmp -s "$generated" "$1" && return 0
+  done
+  return 1
+}
+
+# node:install places a node_modules and a package.json at its package root, so
+# a task case's root may hold those two and nothing a daukle instance did not
+# put there. A root node_modules is skipped as a package root of its own, and a
+# package.json the case itself carries, such as a nested "type", is its fixture.
+assert_root_holds_only_placed_entries() {
+  for package_root in "$sandbox" "$sandbox"/*/; do
+    package_root=${package_root%/}
+    case "$(basename "$package_root")" in build|fixtures|plugins|node_modules) continue ;; esac
+    [ -d "$package_root" ] || continue
+    shown_root=${package_root#"$sandbox"}
+    shown_root=${shown_root#/}
+    shown_root=${shown_root:-the project root}
+    if [ -e "$package_root/package-lock.json" ]; then
+      fail "$label" "$shown_root holds package-lock.json"
+      return 1
+    fi
+    if [ -e "$package_root/node_modules" ] && [ ! -e "$package_root/node_modules/.daukle-copy" ] &&
+      ! shows_a_derived_node_modules "$package_root/node_modules"; then
+      fail "$label" "$shown_root holds a node_modules that neither links to nor is a marked copy of a derived one"
+      return 1
+    fi
+    if [ -e "$package_root/package.json" ] && ! is_a_placed_package_json "$package_root/package.json" &&
+      ! cmp -s "$case_dir${package_root#"$sandbox"}/package.json" "$package_root/package.json"; then
+      fail "$label" "$shown_root holds a package.json that is not a generated one"
+      return 1
+    fi
+  done
+  return 0
+}
+
 # What a failure must NOT say, which is the only way to assert that something
 # did not happen: a sequence that stops at its first failing step is otherwise
 # indistinguishable from one that ran every step and reported the last.
@@ -227,23 +281,75 @@ run_error_case() {
   assert_absent_clauses
 }
 
+run_in_sandbox() {
+  (cd "$sandbox" && { [ ! -f "$case_dir/env.txt" ] || { set -a; . "$case_dir/env.txt"; set +a; }; } &&
+    "$daukle" "$@" >stdout.txt 2>stderr.txt)
+}
+
+# A refusal must leave what it refused exactly as the case carried it.
+assert_untouched() {
+  [ -f "$case_dir/expect-untouched.txt" ] || return 0
+  while IFS= read -r untouched || [ -n "$untouched" ]; do
+    [ -z "$untouched" ] && continue
+    if ! cmp -s "$case_dir/$untouched" "$sandbox/$untouched"; then
+      fail "$label" "$untouched was changed or removed"
+      return 1
+    fi
+  done < "$case_dir/expect-untouched.txt"
+  return 0
+}
+
 run_task_error_case() {
-  if (cd "$sandbox" && "$daukle" "$task" >stdout.txt 2>stderr.txt); then
+  if run_in_sandbox "$task"; then
     fail "$label" "expected task $task to fail, got success"
     return 1
   fi
   assert_clauses "$case_dir/expect-task-error.txt" 1 || return 1
-  assert_absent_clauses
+  assert_absent_clauses || return 1
+  assert_untouched
+}
+
+# then.sh changes the project between two runs, which is the only way a case
+# reaches what a SECOND install meets. then-task.txt names a different task for
+# that run, for a case whose second install is another instance's.
+run_then() {
+  [ -f "$case_dir/then.sh" ] || return 0
+  if ! (cd "$sandbox" && DAUKLE=$daukle && export DAUKLE && sh "$case_dir/then.sh") >"$sandbox/then.txt" 2>&1; then
+    fail "$label" "then.sh failed: $(cat "$sandbox/then.txt")"
+    return 1
+  fi
+  then_task=$task
+  [ -f "$case_dir/then-task.txt" ] && then_task=$(cat "$case_dir/then-task.txt")
+  if [ -f "$case_dir/expect-then-output.txt" ]; then
+    if ! run_in_sandbox "$then_task"; then
+      fail "$label" "task $then_task failed after then.sh"
+      sed -n '1,60p' "$sandbox/stderr.txt" >&2
+      return 1
+    fi
+    assert_clauses "$case_dir/expect-then-output.txt" 1 || return 1
+    assert_root_holds_only_placed_entries
+    return
+  fi
+  if [ ! -f "$case_dir/expect-then-error.txt" ]; then
+    fail "$label" "then.sh is present with neither expect-then-output.txt nor expect-then-error.txt"
+    return 1
+  fi
+  if run_in_sandbox "$then_task"; then
+    fail "$label" "expected task $then_task to fail after then.sh, got success"
+    return 1
+  fi
+  assert_clauses "$case_dir/expect-then-error.txt" 1
 }
 
 run_task_case() {
-  if ! (cd "$sandbox" && "$daukle" "$task" >stdout.txt 2>stderr.txt); then
+  if ! run_in_sandbox "$task"; then
     fail "$label" "task $task failed"
     sed -n '1,60p' "$sandbox/stderr.txt" >&2
     return 1
   fi
   assert_clauses "$case_dir/expect-output.txt" 1 || return 1
-  assert_root_is_clean || return 1
+  assert_root_holds_only_placed_entries || return 1
+  run_then || return 1
   # Running it a second time must change nothing a case named, which is the
   # one assertion that catches an install that is not idempotent.
   [ -f "$case_dir/unchanged.txt" ] || return 0
@@ -253,7 +359,7 @@ run_task_case() {
       fail "$label" "$unchanged was not produced"
       return 1
     }
-    if ! (cd "$sandbox" && "$daukle" "$task" >stdout.txt 2>stderr.txt); then
+    if ! run_in_sandbox "$task"; then
       fail "$label" "the second $task failed"
       sed -n '1,40p' "$sandbox/stderr.txt" >&2
       return 1
@@ -348,7 +454,9 @@ run_case() {
            "$sandbox/expect-task-error.txt" "$sandbox/expect-output.txt" \
            "$sandbox/unchanged.txt" "$sandbox/needs-node" \
            "$sandbox/expect-tasks.txt" "$sandbox/expect-no-tasks.txt" \
-           "$sandbox/expect-absent.txt"
+           "$sandbox/expect-absent.txt" "$sandbox/env.txt" "$sandbox/then.sh" \
+           "$sandbox/then-task.txt" "$sandbox/expect-then-output.txt" \
+           "$sandbox/expect-then-error.txt" "$sandbox/expect-untouched.txt"
     stage_plugin "$sandbox"
     # Only the cases that run node get the module trees, so an ordinary sync
     # case's sandbox holds nothing but what its own directory carried.

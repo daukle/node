@@ -43,6 +43,47 @@ function findNested(directory) {
 }
 findNested("");
 nested.sort();
+
+const ignored = { node_modules: false, package_json: false };
+/** @implNote no accepted form ends in a slash: git classifies a POSIX symlink as a file, so a directory-only pattern does not ignore the link node:install places (Git for Windows treats a junction as a directory, which hides this there). */
+const ROOT_ENTRIES = [
+  { fact: "node_modules", name: "node_modules",
+    forms: (prefixFromIgnoreFile) => ["node_modules", "**/node_modules", "/" + prefixFromIgnoreFile + "node_modules"] },
+  { fact: "package_json", name: "package.json",
+    forms: (prefixFromIgnoreFile) => ["package.json", "**/package.json", "/" + prefixFromIgnoreFile + "package.json"] },
+];
+/** @implNote any negation that could reach the entry, by a wildcard or by naming it, clears the fact without being matched: a false "ignored" lets generated files be committed, a false "not ignored" costs the user one line. */
+function mayUnignore(pattern, entry) {
+  return /[*?[]/.test(pattern) || pattern.includes(entry.name);
+}
+function readIgnoreLines(path) {
+  try { return readFileSync(path, "utf8").split("\n"); }
+  catch (error) { if (error.code === "ENOENT") return []; throw error; }
+}
+/** @implNote only the end of a line is trimmed, because git keeps leading whitespace as part of the pattern. */
+function applyIgnore(path, prefixFromIgnoreFile) {
+  for (const raw of readIgnoreLines(path)) {
+    const line = raw.trimEnd();
+    if (line === "" || line.startsWith("#")) continue;
+    const negated = line.startsWith("!");
+    const pattern = negated ? line.slice(1) : line;
+    for (const entry of ROOT_ENTRIES) {
+      if (negated && mayUnignore(pattern, entry)) ignored[entry.fact] = false;
+      else if (!negated && entry.forms(prefixFromIgnoreFile).includes(pattern)) ignored[entry.fact] = true;
+    }
+  }
+}
+const depth = (process.argv[2] ?? "").split("/").filter(Boolean).length;
+const segments = process.cwd().split(/[\\/]/).filter(Boolean);
+try {
+  for (let level = depth; level >= 0; level--) {
+    const prefixFromIgnoreFile = level === 0 ? "" : segments.slice(segments.length - level).join("/") + "/";
+    applyIgnore("../".repeat(level) + ".gitignore", prefixFromIgnoreFile);
+  }
+} catch {
+  ignored.node_modules = false;
+  ignored.package_json = false;
+}
 const own = JSON.parse(readFileSync(join(here, "package.json"), "utf8"));
 const bins = {};
 for (const name of Object.keys({ ...own.dependencies, ...own.devDependencies })) {
@@ -55,7 +96,7 @@ for (const name of Object.keys({ ...own.dependencies, ...own.devDependencies }))
     : Object.keys(map ? manifest.bin : {});
   for (const command of commands) (bins[command] ??= []).push({ name, map });
 }
-process.stdout.write(JSON.stringify({ exists, bins, nested, unreadable }));
+process.stdout.write(JSON.stringify({ exists, bins, nested, unreadable, ignored }));
 ]==]
 
 local function within(dir, name)
@@ -125,7 +166,8 @@ local function probe(context, config)
     unresolved = failure.message
   end
   local answer = daukle.exec(root:tool(pick.node),
-                             { paths.climb_from(context.dir) .. derived(context, "migrate-probe/" .. PROBE_NAME) },
+                             { paths.climb_from(context.dir) .. derived(context, "migrate-probe/" .. PROBE_NAME),
+                               paths.climb_from(context.dir) },
                              { cwd = context.dir or ".", capture = true })
   return daukle.json_parse(answer.stdout), unresolved
 end
@@ -144,6 +186,12 @@ local FOREIGN_LOCKFILE = "pins this project's dependencies for another package m
                          .. " migration would install with npm and drop those pins"
 local FOREIGN_LOCKFILE_ROW = "4. Install, lockfile and registry configuration: another package"
                              .. " manager's lockfile (`yarn.lock`, `pnpm-lock.yaml`, `bun.lock`, `bun.lockb`)"
+
+local ROOT_ENTRIES_ROW = "2. Module resolution: a tool that resolves `node_modules` or reads `package.json` itself"
+local ROOT_ENTRIES = {
+  { fact = "node_modules", line = "node_modules" },
+  { fact = "package_json", line = "/package.json" },
+}
 
 local REFUSED_FILES = {
   { name = "npm-shrinkwrap.json", why = NPM_CONFIGURATION,
@@ -188,6 +236,15 @@ local function run(context)
                                 why = "is a directory the migrator cannot list (" .. directory.why
                                       .. "), so a nested package.json in it cannot be ruled out",
                                 surface = "NPM-SURFACE.md: " .. NESTED_ROW }
+  end
+  for _, entry in ipairs(ROOT_ENTRIES) do
+    if not facts.ignored[entry.fact] then
+      blockers[#blockers + 1] = { construct = ".gitignore", where = within(context.dir, ".gitignore"),
+                                  why = "does not ignore " .. entry.line .. ", which node:install places at"
+                                        .. " the package root as links into build/daukle/" .. context.instance
+                                        .. ": add the line " .. entry.line,
+                                  surface = "NPM-SURFACE.md: " .. ROOT_ENTRIES_ROW }
+    end
   end
   local owned = { where }
   if facts.exists["package-lock.json"] then owned[#owned + 1] = within(context.dir, "package-lock.json") end

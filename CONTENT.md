@@ -2,8 +2,8 @@
 
 A `daukle.toolchain` named `node`: it provisions a Node runtime for the host, drives the npm that
 runtime bundles, and generates a `package.json` and a module resolver into `build/daukle/node/`.
-**No file is placed at the project root**, which is the constraint the whole design was found
-under.
+`node:install` places a `node_modules` link and a `package.json` copy at the package root for the
+tools that resolve them themselves, and writes nothing else there.
 
 It also exports `lib/runtimes`, the table of which Node archive a host needs and where `node` and
 `npm-cli.js` sit inside it. A second JavaScript toolchain reaches that through
@@ -19,16 +19,18 @@ collision `daukle/c` paid for first. `0.8.0` lifted that (`D-133`, plugin api 2)
 `apply` is refused `exec` at run time instead, so the two could now share a chunk. Nobody has asked
 for that, and `daukle/npm`'s published `1.0.0` is what keeps them apart.
 
-## How resolution works without a root file
+## How resolution works
 
 Node resolves a bare specifier by walking up from the importing file, so dependencies installed
 into `build/daukle/node/node_modules` are not reachable from a source file at the project root.
-Neither `NODE_PATH` (CommonJS only) nor a root junction (`daukle` must not require symlinks) is
-available.
+`NODE_PATH` serves CommonJS only.
 
-What works is a `module.registerHooks` resolve hook, generated into the derived directory beside the
-`node_modules` it points at. It resolves both module systems, needs no root file and no symlink, and
-is measured against what Node does natively rather than against an expectation.
+What serves both module systems is a `module.registerHooks` resolve hook, generated into the derived
+directory beside the `node_modules` it points at. It is measured against what Node does natively
+rather than against an expectation. A tool that resolves `node_modules` itself bypasses the hook, so
+`node:install` also places a `node_modules` link and a `package.json` copy at the package root
+(`AUTHORING.md`, "What `node:install` places at the package root"); the copy is never a link, and
+`daukle` falls back to a copy of `node_modules` where the platform refuses a link.
 
 **It reaches the process two ways, and both are needed.** `node:run` and every script step name it
 on the command line, as a path relative to the package root they run in. The hook then writes
@@ -45,7 +47,8 @@ and watched go red in this repository's own suite.
 
 ## What runs where, and the project's `type`
 
-`node:install` and `node:tree` run in the derived directory. `node:run` and every script step run in
+`node:install` and `node:tree` run in the derived directory, and `node:tree` installs on its own
+rather than depending on `node:install`. `node:run` and every script step run in
 the package root, the instance's `dir` or the project root, so a relative path in a module means what
 it meant under npm. The key `type` (`"module"` or `"commonjs"`) gives the project's own `.js` files
 the module system it declares, through the resolver, because node never sees the project's own
