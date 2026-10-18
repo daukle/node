@@ -25,7 +25,7 @@ package, sorted, to `build/daukle/node/dependency-tree.txt` and to the terminal.
 | `entry` | the module `node:run` runs. Optional; `node:run` needs it when no script is declared |
 | `scripts` | a script per task, below |
 | `packages`, `devPackages` | package name to version range |
-| `type` | `"module"` or `"commonjs"`: the module system of your own `.js` files, as `type` in a `package.json`. Unset forces nothing. It overrides a nested `package.json`'s own `type` below the package root, which npm would honour: a deliberate difference, and `daukle migrate` blocks such a file rather than override it |
+| `type` | `"module"` or `"commonjs"`: the module system of your own `.js` files, as `type` in a `package.json`. Unset forces nothing. It overrides a nested `package.json`'s own `type` below the package root, which npm would honour: a deliberate difference, and `daukle migrate` blocks such a file rather than override it, searching every directory but `node_modules`, `.git` and `build/daukle` |
 
 A module of yours, run by `node:run` or a script, has the package root as its working directory: the
 directory of the instance (`dir`), or the project root. A relative path in a module means what it
@@ -91,7 +91,8 @@ toolchain cannot.
 - A command no direct dependency provides, or two do.
 - A dependency on a local path: `file:`, `link:`, or a path such as `./lib`, `../lib`, `/abs` or a
   `.tgz` file.
-- A `package.json` below the package root, outside `node_modules`, `build` and dot directories.
+- A `package.json` below the package root, in any directory but `node_modules`, `.git` and the
+  derived `build/daukle`, and a directory that search cannot list.
 - Lifecycle scripts, and a `pre<x>` or `post<x>` beside an `<x>`.
 - `workspaces`, `overrides`, `peerDependencies`, `optionalDependencies`, the project's own `bin`,
   `exports`, `imports`, `files`, `publishConfig`, `packageManager` and the other fields

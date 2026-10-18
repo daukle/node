@@ -21,11 +21,18 @@ for (const name of ["package-lock.json", "npm-shrinkwrap.json", "node_modules", 
 }
 
 const nested = [];
+const unreadable = [];
+function isSkipped(path, name) {
+  return name === "node_modules" || name === ".git" || path === "build/daukle";
+}
 function findNested(directory) {
-  for (const entry of readdirSync(directory || ".", { withFileTypes: true })) {
+  let entries;
+  try { entries = readdirSync(directory || ".", { withFileTypes: true }); }
+  catch (error) { unreadable.push({ path: directory || ".", why: error.code || error.message }); return; }
+  for (const entry of entries) {
     const path = directory ? directory + "/" + entry.name : entry.name;
     if (entry.isDirectory()) {
-      if (entry.name.startsWith(".") || entry.name === "node_modules" || entry.name === "build") continue;
+      if (isSkipped(path, entry.name)) continue;
       findNested(path);
     } else if (directory && entry.name === "package.json") {
       nested.push(path);
@@ -46,7 +53,7 @@ for (const name of Object.keys({ ...own.dependencies, ...own.devDependencies }))
     : Object.keys(map ? manifest.bin : {});
   for (const command of commands) (bins[command] ??= []).push({ name, map });
 }
-process.stdout.write(JSON.stringify({ exists, bins, nested }));
+process.stdout.write(JSON.stringify({ exists, bins, nested, unreadable }));
 ]==]
 
 local function within(dir, name)
@@ -143,6 +150,12 @@ local function run(context)
   end
   for _, path in ipairs(facts.nested) do
     blockers[#blockers + 1] = { construct = path, where = within(context.dir, path), why = NESTED_PACKAGE,
+                                surface = "NPM-SURFACE.md: " .. NESTED_ROW }
+  end
+  for _, directory in ipairs(facts.unreadable) do
+    blockers[#blockers + 1] = { construct = directory.path, where = within(context.dir, directory.path),
+                                why = "is a directory the migrator cannot list (" .. directory.why
+                                      .. "), so a nested package.json in it cannot be ruled out",
                                 surface = "NPM-SURFACE.md: " .. NESTED_ROW }
   end
   local owned = { where }
