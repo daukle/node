@@ -8,6 +8,12 @@ const asIfImportedFrom = pathToFileURL(anchor).href;
 const requireFromDerived = createRequire(anchor);
 const installedUnder = pathToFileURL(join(here, "node_modules")).href + "/";
 const projectUnder = pathToFileURL(resolvePath(here, "..", "..", "..")).href + "/";
+const projectFormat = null;
+
+function isProjectJavaScript(url) {
+  return projectFormat !== null && url.startsWith(projectUnder) && !url.startsWith(installedUnder)
+    && !url.includes("/node_modules/") && url.endsWith(".js");
+}
 
 function isBare(specifier) {
   if (specifier === "") return false;
@@ -48,6 +54,10 @@ if (!inheritedOptions) {
 let resolving = false;
 
 registerHooks({
+  load(url, context, nextLoad) {
+    if (isProjectJavaScript(url)) return nextLoad(url, { ...context, format: projectFormat });
+    return nextLoad(url, context);
+  },
   resolve(specifier, context, nextResolve) {
     if (resolving || !isBare(specifier) || !belongsToThisProject(context.parentURL)) {
       return nextResolve(specifier, context);

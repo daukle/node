@@ -1,0 +1,1 @@
+"type" is "module" or "commonjs", as in package.json, not "esm"

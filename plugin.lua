@@ -17,7 +17,7 @@ daukle.toolchain{
     runtimes.for_host{ os = context.host.os, arch = context.host.arch, version = spec.version }
     return {
       ["package.json"] = settings.package_json(spec),
-      [runners.RESOLVER_NAME] = runners.RESOLVER,
+      [runners.RESOLVER_NAME] = runners.resolver_for(spec.type),
       [runners.BIN_RUNNER_NAME] = runners.BIN_RUNNER,
     }
   end,

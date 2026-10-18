@@ -2,7 +2,7 @@ local runtimes = daukle.require("lib/runtimes")
 local scripts = daukle.require("lib/scripts")
 
 local KNOWN_KEYS = { version = true, entry = true, packages = true, devPackages = true,
-                     scripts = true }
+                     scripts = true, type = true }
 
 local function config_of(context)
   if context.toolchain ~= nil then return context.toolchain.config end
@@ -45,6 +45,18 @@ local function entry_of(config)
     error(string.format('"entry" must name a module inside the project, and "%s" does not', entry), 0)
   end
   return entry
+end
+
+local TYPES = { module = true, commonjs = true }
+
+local function type_of(config)
+  local value = config.type
+  if value == nil then return nil end
+  if type(value) ~= "string" or not TYPES[value] then
+    error(string.format('"type" is "module" or "commonjs", as in package.json, not "%s"',
+                        tostring(value)), 0)
+  end
+  return value
 end
 
 local SCOPED = "^@[%w][%w%.%_%-]*/[%w][%w%.%_%-]*$"
@@ -126,6 +138,7 @@ local function read(context)
   return {
     version = version_of(context),
     entry = entry_of(config),
+    type = type_of(config),
     scripts = declared_scripts,
     packages = packages,
     package_ranges = package_ranges,
