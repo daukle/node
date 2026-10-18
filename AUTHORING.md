@@ -147,9 +147,9 @@ overrides what a nested `package.json` says; `.mjs` and `.cjs` keep their fixed 
 `type` nothing is forced.
 
 **The format travels two ways, and there is no `load` hook.** An `import` gets it from the resolve
-hook's result, which node honours as the format on 22.15.0, 24.21.0 and 26.3.1. A `require` never
-asks for one, so the resolver also wraps `Module._extensions[".js"]` and compiles the file as the
-project's type. That is a deprecated-but-supported node API and no supported alternative was
+hook's result, which node honours as the format on 22.15.0, 24.21.0 and 26.3.1. A `require` runs
+the same resolve hook, but the CommonJS loader does not reliably honour the format it returns, so
+the resolver also wraps `Module._extensions[".js"]` and compiles the file as the project's type. That is a deprecated-but-supported node API and no supported alternative was
 found; it is why ESM syntax under `"commonjs"` is a SyntaxError on every pin. **A `load` hook is
 refused on purpose**: on 22.15.0 registering any synchronous one routes every CommonJS module,
 dependencies included, through the ESM translator, whose `require` has no `require.cache` and no
