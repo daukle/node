@@ -1,2 +1,1 @@
-import { tag } from "./lib.js";
-console.log(typeof require, tag);
+import("./lib.js").then((lib) => console.log(typeof require, lib.tag));
