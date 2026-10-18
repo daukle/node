@@ -16,21 +16,27 @@ local function task_name_of(script_name)
   return (string.lower((string.gsub(script_name, ":", "."))))
 end
 
-local function checked_script_name(name)
+local function task_name_problem(name)
   if type(name) ~= "string" or name == "" then
-    error('every key of "scripts" names a script, and "' .. tostring(name) .. '" is not a name', 0)
+    return 'every key of "scripts" names a script, and "' .. tostring(name) .. '" is not a name'
   end
   local task = task_name_of(name)
   if string.match(task, "^[%l%d%.%_%-]+$") == nil then
-    error(string.format('"%s" is a script this toolchain cannot name a task after: a task name is'
-                        .. ' lowercase letters, digits, ".", "_" and "-", and a ":" becomes a "."'
-                        .. ' , which leaves "%s"', name, task), 0)
+    return string.format('"%s" is a script this toolchain cannot name a task after: a task name is'
+                         .. ' lowercase letters, digits, ".", "_" and "-", and a ":" becomes a "."'
+                         .. ' , which leaves "%s"', name, task)
   end
   if LIFECYCLE_TASKS[task] then
-    error(string.format('a script may not be called "%s": "node:%s" is a lifecycle verb this'
-                        .. ' toolchain declares itself', name, task), 0)
+    return string.format('a script may not be called "%s": "node:%s" is a lifecycle verb this'
+                         .. ' toolchain declares itself', name, task)
   end
-  return task
+  return nil
+end
+
+local function checked_script_name(name)
+  local problem = task_name_problem(name)
+  if problem ~= nil then error(problem, 0) end
+  return task_name_of(name)
 end
 
 local function checked_args(args, where)
@@ -205,4 +211,5 @@ local function task_scripts(document)
   return out
 end
 
-return { read = read, task_scripts = task_scripts, task_name_of = task_name_of }
+return { read = read, task_scripts = task_scripts, task_name_of = task_name_of,
+         task_name_problem = task_name_problem }
