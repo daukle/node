@@ -8,9 +8,10 @@ reading.
 ## What the implementation found that the spec did not
 
 **A plugin has no absolute path to the project, so `NODE_OPTIONS` cannot be built in Lua.**
-`context.root` is the literal string `"../../.."`, relative to the derived directory a task runs
-in. The spec's section 7 has the plugin assemble `--import <resolver>` and hand it to
-`daukle.exec`'s `env`, and there is nothing to assemble it from.
+`context.root` is the literal string `"../../.."`, relative to the derived directory (for an
+instance with `dir = "web"` it is `"../../../web"`). The spec's section 7 has the plugin
+assemble `--import <resolver>` and hand it to `daukle.exec`'s `env`, and there is nothing to
+assemble it from.
 
 **A relative `--import` is worse than no gate at all.** It is resolved against **each process's
 own** working directory, so an unrelated node started elsewhere under an inherited `NODE_OPTIONS`
@@ -19,11 +20,11 @@ An absolute PATH is refused too, on Windows: `Only URLs with a scheme in: file, 
 supported ... Received protocol 'c:'`. **A `file://` URL is the one spelling that is neither**, and
 it percent-encodes a space, so `NODE_OPTIONS` never needs quoting.
 
-So the resolver is delivered **twice, by two mechanisms**. `node:run` passes
-`--import ./__daukle_resolver__.mjs` on the command line, which is correct because a task's working
-directory is the derived directory. The resolver then writes the absolute form into
-`process.env.NODE_OPTIONS` itself, from its own `import.meta.url`, which is how a descendant gets
-it. That is the spec's semantics with the one step the plugin could not take moved into the file
+So the resolver is delivered **twice, by two mechanisms**. `node:run` and every script step pass
+`--import <derived directory>/__daukle_resolver__.mjs` on the command line, as a path relative to
+the package root they run in, starting with `./` or `../` so it stays a relative URL rather than a
+bare specifier. The resolver then writes the absolute form into `process.env.NODE_OPTIONS` itself,
+from its own `import.meta.url`, which is how a descendant gets it. That is the spec's semantics with the one step the plugin could not take moved into the file
 that can take it.
 
 **`context.conditions` is not one shape per version, it is one shape per MODULE SYSTEM.** Measured
@@ -108,7 +109,15 @@ scripts**, because a duplicate task is fatal in core and would otherwise name ne
 
 **`entry` is required only when no script is declared.** A project that declares scripts has named
 several things to run and has no reason to elect one; `node:run` then refuses and names the script
-tasks, which is `daukle/cmake`'s shape for the same problem.
+tasks, which is `daukle/cmake`'s shape for the same problem. A project with neither syncs and
+installs, and only `node:run` refuses.
+
+**`install`, `run` and `tree` are not script names**, because `node:install`, `node:run` and
+`node:tree` hold them.
+
+**The script tasks are the union over every `node` instance.** A plugin's tasks are declared once
+and core repeats them per instance, so an instance `node-web` lists a script only another instance
+declares, and running it there fails naming the script rather than doing something else.
 
 **A project whose ONLY manifest is `daukle.lua` gets no per-script task**, keeping `node:install`
 and `node:run`. Core accepts such a project by falling back to the overlay when no primary exists,
@@ -116,6 +125,56 @@ so `daukle.manifest` names a Lua file, and `daukle.parse` refuses to run an exec
 no `pcall` available to soften it. Nothing a chunk can reach sees a Lua-declared config, so the
 alternative to this boundary is not more tasks but a crash on **every** command: that is what
 `daukle/cmake@1.4.0` shipped and `1.4.1` fixed.
+
+## Where a task runs
+
+`node:install` and `node:tree` run in the derived directory `build/daukle/<instance>/`, because npm
+reads the `package.json` beside its working directory. `node:run` and every script step run with
+the package root as their working directory, which is the instance's `dir` or the project root, so a
+module reading `./data.json` reads the project's file as it would under npm. The package root is
+recovered from `context.root` by stripping its leading `../../../`, which is the only way `dir`
+reaches the plugin.
+
+## The project's own `type`
+
+The generated `package.json` carries no `type`, and node never sees the project's own, so the key
+`type` (`"module"` or `"commonjs"`) is served by the resolver, which is generated with the value
+written into it. It applies to a `.js` file under the project and outside any `node_modules`, and
+overrides what a nested `package.json` says; `.mjs` and `.cjs` keep their fixed formats. With no
+`type` nothing is forced.
+
+**`"module"` goes through the `load` hook**, which hands the format to `nextLoad`; that is honoured
+on 22.15.0, 24.21.0 and 26.3.1. **`"commonjs"` needs more.** The hook's format is not honoured for
+CommonJS on 24.21.0 and 26.3.1 (measured), so the resolver also wraps `Module._extensions[".js"]`
+and compiles the file as CommonJS. That is a deprecated-but-supported node API and no supported
+alternative was found; it is why ESM syntax under `"commonjs"` is a SyntaxError on every pin.
+
+## Migrating from npm
+
+`daukle migrate` turns a `package.json` project into a `node` toolchain through the migrator in
+`lib/migrator.lua`, which uses `lib/translate.lua`, `lib/command_line.lua` and `lib/engines.lua`.
+The design is `daukle/docs` `superpowers/specs/2026-10-18-npm-migrator-design.md`, and the list of
+what npm can do that this toolchain cannot is `daukle/docs` `NPM-SURFACE.md`; every blocker names
+one of its rows.
+
+- **`run` reads `package.json` with `daukle.read` and installs its dependencies into
+  `migrate-probe/`** with `--ignore-scripts`, to learn which direct dependency provides each command
+  a script runs and which of `package-lock.json`, `npm-shrinkwrap.json`, `node_modules`, `.npmrc`,
+  `.nvmrc` and `.node-version` exist. Existence is asked of node because `daukle.read` raises on a
+  missing file and the sandbox has no `pcall`.
+- **Nothing is dropped silently.** An unknown field, every `engines` key other than `node`, a
+  non-map `engines`, a dependency name or a `main` that `lib/settings.lua` would refuse, and the
+  files above other than `package-lock.json` and `node_modules` are blockers. Metadata that no build
+  reads is dropped by name. `package-lock.json` and `node_modules` are owned and move aside.
+- **A script becomes steps by a closed grammar.** Whitespace-separated words joined by `&&`; a
+  newline, a quote that is not a whole word, any shell character in `lib/command_line.lua` and its
+  shell builtins and keywords refuse the script. Single quotes are read with their `sh` meaning on
+  every host.
+- **`build` is the proof.** It installs the OLD project in `migrate-old/` (`npm ci` when a lockfile
+  exists) and writes its tree; the proof task is `node:tree` on the migrated project, and the two
+  are compared as bytes. A project with a lockfile fails whenever a range has moved since it was
+  written, which is the cost of refusing a committed lockfile. Core prints that the new build
+  differs and both digests; it does not list the differing packages, and both trees are on stdout.
 
 ## Decisions this implementation took that the spec left open
 

@@ -1,0 +1,2 @@
+node-web:check
+node-web:install

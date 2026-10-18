@@ -2,7 +2,7 @@ local runtimes = daukle.require("lib/runtimes")
 local scripts = daukle.require("lib/scripts")
 
 local KNOWN_KEYS = { version = true, entry = true, packages = true, devPackages = true,
-                     scripts = true }
+                     scripts = true, type = true }
 
 local function config_of(context)
   if context.toolchain ~= nil then return context.toolchain.config end
@@ -35,27 +35,45 @@ local function climbs_out(path)
   return string.find(path, "/../", 1, true) ~= nil or string.match(path, "/%.%.$") ~= nil
 end
 
---[[ @implNote "entry" is required only when nothing else says what to run. A
-     project that declares scripts has named several things to run and has no
-     reason to elect one, so demanding an entry there would be demanding a
-     module it does not have; node:run names the scripts instead. ]]
-local function entry_of(config, declared_scripts)
+local function is_project_path(path)
+  return path ~= "" and not climbs_out(path)
+end
+
+local function entry_of(config)
   local entry = config.entry
-  if entry == nil then
-    if #declared_scripts > 0 then return nil end
-    error('a node toolchain needs an "entry": the module "node:run" runs cannot be inferred', 0)
-  end
+  if entry == nil then return nil end
   if type(entry) ~= "string" then
     error('"entry" must name a module as a path string, not a ' .. type(entry), 0)
   end
-  if entry == "" or climbs_out(entry) then
+  if not is_project_path(entry) then
     error(string.format('"entry" must name a module inside the project, and "%s" does not', entry), 0)
   end
   return entry
 end
 
+local TYPES = { module = true, commonjs = true }
+
+local function type_of(config)
+  local value = config.type
+  if value == nil then return nil end
+  if type(value) ~= "string" or not TYPES[value] then
+    error(string.format('"type" is "module" or "commonjs", as in package.json, not "%s"',
+                        tostring(value)), 0)
+  end
+  return value
+end
+
 local SCOPED = "^@[%w][%w%.%_%-]*/[%w][%w%.%_%-]*$"
 local PLAIN = "^[%w][%w%.%_%-]*$"
+
+local function package_name_problem(name)
+  if type(name) ~= "string"
+     or (string.match(name, PLAIN) == nil and string.match(name, SCOPED) == nil) then
+    return string.format('"%s" is not an npm package name: a name is "lodash" or "@scope/name"',
+                         tostring(name))
+  end
+  return nil
+end
 
 --[[ @implNote the generated package.json is written without a json escaper, so
      what could need escaping is refused at the edge instead. Every npm name and
@@ -90,11 +108,8 @@ local function checked_packages(config, key)
   end
   local names = {}
   for name, range in pairs(packages) do
-    if type(name) ~= "string"
-       or (string.match(name, PLAIN) == nil and string.match(name, SCOPED) == nil) then
-      error(string.format('"%s" is not an npm package name: a name is "lodash" or "@scope/name"',
-                          tostring(name)), 0)
-    end
+    local problem = package_name_problem(name)
+    if problem ~= nil then error(problem, 0) end
     checked_range(name, range, key)
     names[#names + 1] = name
   end
@@ -132,7 +147,8 @@ local function read(context)
   local declared_scripts = scripts.read(config)
   return {
     version = version_of(context),
-    entry = entry_of(config, declared_scripts),
+    entry = entry_of(config),
+    type = type_of(config),
     scripts = declared_scripts,
     packages = packages,
     package_ranges = package_ranges,
@@ -144,4 +160,6 @@ end
 return {
   read = read,
   package_json = package_json,
+  package_name_problem = package_name_problem,
+  is_project_path = is_project_path,
 }

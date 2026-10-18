@@ -1,0 +1,2 @@
+dependencies."lib"
+3. Dependencies: local paths, `file:`

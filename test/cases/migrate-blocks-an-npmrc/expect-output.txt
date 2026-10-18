@@ -1,0 +1,2 @@
+.npmrc
+a project `.npmrc`

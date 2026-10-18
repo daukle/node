@@ -1,0 +1,1 @@
+{"scripts":{"pretest":"node a.js","test":"node b.js"}}

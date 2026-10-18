@@ -1,0 +1,2 @@
+node_modules/dep/package.json
+build/daukle/node/package.json
