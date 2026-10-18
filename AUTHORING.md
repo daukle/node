@@ -129,7 +129,9 @@ alternative to this boundary is not more tasks but a crash on **every** command:
 ## Where a task runs
 
 `node:install` and `node:tree` run in the derived directory `build/daukle/<instance>/`, because npm
-reads the `package.json` beside its working directory. `node:run` and every script step run with
+reads the `package.json` beside its working directory. `node:tree` installs on its own instead of
+depending on `node:install`, because the migration proof runs before core moves the old
+`package.json` aside and must not place the root entries. `node:run` and every script step run with
 the package root as their working directory, which is the instance's `dir` or the project root, so a
 module reading `./data.json` reads the project's file as it would under npm. The package root is
 recovered from `context.root` by stripping its leading `../../../`, which is the only way `dir`
@@ -137,9 +139,10 @@ reaches the plugin.
 
 ## The project's own `type`
 
-The generated `package.json` carries no `type`, and node never sees the project's own, so the key
-`type` (`"module"` or `"commonjs"`) is served by the resolver, which is generated with the value
-written into it. It applies to a `.js` file under the project and outside any `node_modules`, and
+The generated `package.json` carries the toolchain's `type`, and so does the copy placed at the
+package root. The resolver still enforces it, because a nested `package.json` is a format boundary
+for node and the key `type` (`"module"` or `"commonjs"`) overrides it; the resolver is generated with
+the value written into it. It applies to a `.js` file under the project and outside any `node_modules`, and
 overrides what a nested `package.json` says; `.mjs` and `.cjs` keep their fixed formats. With no
 `type` nothing is forced.
 
@@ -148,6 +151,46 @@ on 22.15.0, 24.21.0 and 26.3.1. **`"commonjs"` needs more.** The hook's format i
 CommonJS on 24.21.0 and 26.3.1 (measured), so the resolver also wraps `Module._extensions[".js"]`
 and compiles the file as CommonJS. That is a deprecated-but-supported node API and no supported
 alternative was found; it is why ESM syntax under `"commonjs"` is a SyntaxError on every pin.
+
+## What `node:install` places at the package root
+
+`node:install` ends by running a generated `__daukle_link__.mjs` (`lib/links.lua`) with the
+provisioned node. It places `node_modules` and `package.json` at the package root, because tools such
+as `tsc` 7, `vite` 8 and `jest` 30 resolve them by walking up from the source file and no other
+location is reachable. The design is `daukle/docs`
+`superpowers/specs/2026-10-18-tools-that-resolve-node-modules-design.md`, sections 6 and 9, and the
+cases that prove it are `tsc-7-finds-node-types-through-the-root`,
+`vite-8-bundles-a-dependency-through-the-root` and `jest-30-finds-its-root-and-a-dependency`.
+
+**`package.json` is always a marked COPY, never a link.** Core writes a generated file by atomic
+rename (`fr_derived_apply`, `src/project/derived.c`). A symlink would carry a user's edit of the root
+file into the generated one, which the next sync overwrites with only a notice. A hard link goes
+stale on every sync that changes the file. Only a copy lets `node:install` see an edit and refuse it.
+Sync cannot refuse it, because it cannot read the root file conditionally.
+
+**What marks an entry as daukle's.** The generated `package.json` has `"//"` as its first key, a
+sentence saying daukle generates it (`"//"` is the key npm documents as ignored). A copied
+`node_modules` holds a `.daukle-copy` file. A linked `node_modules` is a symbolic link (node reports a
+junction as one) whose target is this instance's `build/daukle/<instance>/node_modules`.
+
+**The edit check has a memory.** The bytes placed are written to
+`build/daukle/<instance>/__daukle_placed__.json`. A marked root `package.json` with no such file, as
+after `daukle clean`, is replaced. With the file and different bytes it is refused, which is how an
+older generation after a manifest change is told from a hand edit.
+
+**`node_modules` is a junction on Windows (it needs no privilege) and a `"dir"` symlink elsewhere,**
+and it is always created, even when nothing is declared. It degrades to a marked copy on `EPERM`, `ENOTSUP` or `EINVAL`. The environment
+variable `DAUKLE_NODE_LINK=copy` forces that, and is the only way to make a link fail on a CI runner.
+
+**It refuses, never replaces, what it did not place.** A real root `node_modules` or `package.json`,
+a `node_modules` link pointing elsewhere (naming that two node toolchains cannot share one package
+root, when it points into another instance), and an edited root `package.json`. The migrator
+(`ROOT_ENTRIES`, `lib/migrator.lua`) blocks a project whose `.gitignore` files, read from the project
+root down to the package root, do not ignore `node_modules/` and `/package.json`.
+
+**`node:tree` does not place them.** Core runs the migration proof (`<instance>:tree`) before it moves
+the old `package.json` aside (`fr_migrate_finish`, `src/migrate/migrate_finish.c`), so the proof
+cannot depend on `node:install`.
 
 ## Migrating from npm
 

@@ -61,8 +61,7 @@ daukle.task{
 }
 
 --[[ @implNote the migration proof runs before core moves the old package.json
-     aside, so tree must not place the root entries and installs on its own
-     rather than depending on node:install. ]]
+     aside, so tree installs on its own instead of depending on node:install ]]
 daukle.task{
   name = "node:tree",
   run = function(context)

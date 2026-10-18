@@ -1,8 +1,8 @@
 # node-hello-dependency
 
 A managed Node project with a dependency. The repository holds `daukle.toml` and `src/` and
-**nothing else**: no `package.json`, no `package-lock.json`, no `node_modules`, no `.npmrc`, and no
-link of any kind at the project root. daukle downloads a Node runtime, verifies it against a digest
+**nothing else**: no `package.json`, no `package-lock.json`, no `node_modules` and no `.npmrc` are
+committed. daukle downloads a Node runtime, verifies it against a digest
 the plugin pins, generates a `package.json` into `build/daukle/node/`, and drives the npm that
 runtime bundles.
 
@@ -14,15 +14,16 @@ hello from daukle: 42 is even
 `daukle node:install` provisions node and installs `is-even` into `build/daukle/node/`, and
 `node:run` does that first if needed. `daukle tasks` lists the two tasks and their order.
 
-Run `ls` afterwards. The root still holds only `daukle.toml`, `src/` and `build/`.
+Run `ls` afterwards. Beside `daukle.toml`, `src/` and `build/` the root now holds a `node_modules`
+link and a `package.json` copy, both placed by `node:install` and both meant to be gitignored.
 
 ## What to look at
 
 **`src/main.mjs` imports `is-even` as a bare specifier**, and `node_modules` is three directories
 away in `build/daukle/node/`, which node's own resolution would never find. What finds it is
 `__daukle_resolver__.mjs`, generated beside those packages and handed to node with `--import`. It
-is a `module.registerHooks` resolve hook, it covers `import` and `require` alike, and it needs no
-file at the project root and no symlink.
+is a `module.registerHooks` resolve hook, it covers `import` and `require` alike, and it needs
+neither the root `node_modules` nor the root `package.json`, which exist for the tools that bypass it.
 
 **This example names a published coordinate, exactly as your project would**, so the directory can
 be copied anywhere and `daukle sync` works. The suite runs it twice, once as committed against the
