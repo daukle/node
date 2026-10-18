@@ -8,7 +8,7 @@ local BIN_RUNNER_NAME = "__daukle_bin__.mjs"
      accept a path to a file that does not exist, and it is only there to name
      the directory resolution starts from. ]]
 local RESOLVER = [==[
-import Module, { createRequire, registerHooks } from "node:module";
+import Module, { createRequire, isBuiltin, registerHooks } from "node:module";
 import { readFileSync } from "node:fs";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { dirname, join, resolve as resolvePath } from "node:path";
@@ -39,9 +39,12 @@ if (projectFormat === "commonjs") {
   };
 }
 
-function isBare(specifier) {
+// A builtin named without "node:" is bare too, and require.resolve answers it
+// with its own name, which pathToFileURL would turn into a file in the cwd.
+function namesAPackage(specifier) {
   if (specifier === "") return false;
   if (specifier[0] === "." || specifier[0] === "/") return false;
+  if (isBuiltin(specifier)) return false;
   return !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(specifier);
 }
 
@@ -83,7 +86,7 @@ registerHooks({
     return nextLoad(url, context);
   },
   resolve(specifier, context, nextResolve) {
-    if (resolving || !isBare(specifier) || !belongsToThisProject(context.parentURL)) {
+    if (resolving || !namesAPackage(specifier) || !belongsToThisProject(context.parentURL)) {
       return nextResolve(specifier, context);
     }
     if (hasCondition(context.conditions, "import")) {
