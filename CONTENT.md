@@ -30,8 +30,8 @@ What works is a `module.registerHooks` resolve hook, generated into the derived 
 `node_modules` it points at. It resolves both module systems, needs no root file and no symlink, and
 is measured against what Node does natively rather than against an expectation.
 
-**It reaches the process two ways, and both are needed.** `node:run` names it on the command line,
-which is correct because a task's working directory is the derived directory. The hook then writes
+**It reaches the process two ways, and both are needed.** `node:run` and every script step name it
+on the command line, as a path relative to the package root they run in. The hook then writes
 its own absolute `file://` URL into `NODE_OPTIONS`, which is how a descendant process gets it. A
 relative path cannot do that job: `NODE_OPTIONS` is inherited and resolved against each process's
 own working directory, so it would kill an unrelated node started elsewhere rather than merely
@@ -42,6 +42,21 @@ wrong: resolving with `require.resolve` hands an ESM importer the `require` bran
 package, a nested `node_modules` loses to the hoisted copy, and an ungated hook shadows an
 unrelated project's own packages through an inherited `NODE_OPTIONS`. Every one of them is mutated
 and watched go red in this repository's own suite.
+
+## What runs where, and the project's `type`
+
+`node:install` and `node:tree` run in the derived directory. `node:run` and every script step run in
+the package root, the instance's `dir` or the project root, so a relative path in a module means what
+it meant under npm. The key `type` (`"module"` or `"commonjs"`) gives the project's own `.js` files
+the module system it declares, through the resolver, because node never sees the project's own
+`package.json`. `AUTHORING.md` holds the mechanism and the one deprecated node API it needs.
+
+## Migrating from npm
+
+`daukle migrate` turns a `package.json` project into this toolchain, all or nothing: every field it
+cannot carry over exactly is a blocker naming its row in `daukle/docs` `NPM-SURFACE.md`. The proof
+compares the old project's installed dependency tree with `node:tree` on the new one. `wiki/index.md`
+lists what migrates and what blocks.
 
 ## The minimum Node
 
