@@ -6,7 +6,13 @@ local BIN_RUNNER_NAME = "__daukle_bin__.mjs"
      resolves natively from a twin tree rather than asserting that a module
      loaded. The anchor is never created: createRequire and pathToFileURL both
      accept a path to a file that does not exist, and it is only there to name
-     the directory resolution starts from. ]]
+     the directory resolution starts from.
+
+     There is no load hook, so the project's type travels on the resolve
+     result and through Module._extensions instead: on v22.15.0 any synchronous
+     load hook routes every CommonJS module through the ESM translator, whose
+     require has no cache and no resolve.paths, and that release refuses the
+     null source a hook would need to hand the module back. ]]
 local RESOLVER = [==[
 import Module, { createRequire, isBuiltin, registerHooks } from "node:module";
 import { readFileSync } from "node:fs";
@@ -28,13 +34,13 @@ function isProjectJavaScript(url) {
 
 const loadJavaScriptNatively = Module._extensions[".js"];
 
-function compileAsCommonJs(module, filename) {
-  module._compile(readFileSync(filename, "utf8"), filename, "commonjs");
+function compileInProjectFormat(module, filename) {
+  module._compile(readFileSync(filename, "utf8"), filename, projectFormat);
 }
 
-if (projectFormat === "commonjs") {
+if (projectFormat !== null) {
   Module._extensions[".js"] = function (module, filename) {
-    if (isProjectJavaScript(pathToFileURL(filename).href)) return compileAsCommonJs(module, filename);
+    if (isProjectJavaScript(pathToFileURL(filename).href)) return compileInProjectFormat(module, filename);
     return loadJavaScriptNatively(module, filename);
   };
 }
@@ -80,24 +86,26 @@ if (!inheritedOptions) {
 
 let resolving = false;
 
+function resolveSpecifier(specifier, context, nextResolve) {
+  if (resolving || !namesAPackage(specifier) || !belongsToThisProject(context.parentURL)) {
+    return nextResolve(specifier, context);
+  }
+  if (hasCondition(context.conditions, "import")) {
+    return nextResolve(specifier, { ...context, parentURL: asIfImportedFrom });
+  }
+  resolving = true;
+  try {
+    return { url: pathToFileURL(requireFromDerived.resolve(specifier)).href, shortCircuit: true };
+  } finally {
+    resolving = false;
+  }
+}
+
 registerHooks({
-  load(url, context, nextLoad) {
-    if (isProjectJavaScript(url)) return nextLoad(url, { ...context, format: projectFormat });
-    return nextLoad(url, context);
-  },
   resolve(specifier, context, nextResolve) {
-    if (resolving || !namesAPackage(specifier) || !belongsToThisProject(context.parentURL)) {
-      return nextResolve(specifier, context);
-    }
-    if (hasCondition(context.conditions, "import")) {
-      return nextResolve(specifier, { ...context, parentURL: asIfImportedFrom });
-    }
-    resolving = true;
-    try {
-      return { url: pathToFileURL(requireFromDerived.resolve(specifier)).href, shortCircuit: true };
-    } finally {
-      resolving = false;
-    }
+    const resolved = resolveSpecifier(specifier, context, nextResolve);
+    if (isProjectJavaScript(resolved.url)) return { ...resolved, format: projectFormat };
+    return resolved;
   },
 });
 ]==]
