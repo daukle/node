@@ -1,6 +1,8 @@
 #!/bin/sh
 # Every case is run against a real daukle, because this plugin's output is
 # node's and npm's, and a stub of daukle.exec would be testing the stub.
+# The migrate cases also need curl and python3 (or python), which every GitHub
+# ubuntu, macOS and windows runner carries.
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -37,6 +39,79 @@ stage_plugin() {
   mkdir -p "$1/plugins/node"
   cp "$root/plugin.lua" "$1/plugins/node/plugin.lua"
   cp -R "$root/lib" "$1/plugins/node/lib"
+}
+
+# The catalog's asset is pinned by url and sha256, and core takes only https or
+# loopback http for it, so the staged plugin is packed exactly as publish.yml
+# packs it and served from 127.0.0.1.
+serve_plugin() {
+  [ -n "${catalog:-}" ] && return 0
+  python=$(command -v python3 || command -v python)
+  asset_dir="$work/asset"
+  mkdir -p "$asset_dir"
+  (cd "$root" && tar -cf "$asset_dir/plugin.lua" plugin.lua lib/*.lua)
+  digest=$(sha256sum "$asset_dir/plugin.lua" 2>/dev/null | cut -d' ' -f1)
+  [ -n "$digest" ] || digest=$(shasum -a 256 "$asset_dir/plugin.lua" | cut -d' ' -f1)
+  port=$((20000 + $$ % 20000))
+  "$python" -m http.server "$port" --bind 127.0.0.1 --directory "$asset_dir" >/dev/null 2>&1 &
+  server=$!
+  trap 'kill "$server" 2>/dev/null || true' EXIT
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    curl -fsS "http://127.0.0.1:$port/plugin.lua" -o /dev/null 2>/dev/null && break
+    sleep 1
+  done
+  catalog="$work/catalog.json"
+  "$python" -c 'import json,sys; c=json.load(open(sys.argv[1])); c.update(id="node", asset={"url":sys.argv[2],"sha256":sys.argv[3]}); json.dump({"plugins":[c]}, open(sys.argv[4],"w"))' \
+    "$root/catalog.json" "http://127.0.0.1:$port/plugin.lua" "$digest" "$catalog"
+}
+
+grep_clauses_in() {
+  file=$1; clauses=$2
+  [ -f "$clauses" ] || return 0
+  while IFS= read -r clause || [ -n "$clause" ]; do
+    [ -z "$clause" ] && continue
+    grep -qF "$clause" "$file" || { fail "$label" "$(basename "$file") does not carry: $clause"; return 1; }
+  done < "$clauses"
+}
+
+run_migrate_case() {
+  serve_plugin
+  status=0
+  (cd "$sandbox" && "$daukle" migrate --catalog "$catalog" >stdout.txt 2>stderr.txt) || status=$?
+  wanted=$(cat "$case_dir/expect-exit.txt")
+  if [ "$status" -ne "$wanted" ]; then
+    fail "$label" "migrate exited $status, wanted $wanted"
+    sed -n '1,60p' "$sandbox/stdout.txt" "$sandbox/stderr.txt" >&2
+    return 1
+  fi
+  cat "$sandbox/stdout.txt" "$sandbox/stderr.txt" > "$sandbox/both.txt"
+  grep_clauses_in "$sandbox/both.txt" "$case_dir/expect-output.txt" || return 1
+  grep_clauses_in "$sandbox/daukle.toml" "$case_dir/expect-manifest.txt" || return 1
+  if [ -f "$case_dir/expect-gone.txt" ]; then
+    while IFS= read -r gone || [ -n "$gone" ]; do
+      [ -z "$gone" ] && continue
+      [ -e "$sandbox/$gone" ] && { fail "$label" "$gone is still in the project"; return 1; }
+    done < "$case_dir/expect-gone.txt"
+  fi
+  if [ -f "$case_dir/expect-present.txt" ]; then
+    while IFS= read -r present || [ -n "$present" ]; do
+      [ -z "$present" ] && continue
+      [ -e "$sandbox/$present" ] || { fail "$label" "$present is no longer in the project"; return 1; }
+    done < "$case_dir/expect-present.txt"
+  fi
+  if [ -f "$case_dir/expect-kept.txt" ]; then
+    while IFS= read -r kept || [ -n "$kept" ]; do
+      [ -z "$kept" ] && continue
+      [ -e "$sandbox/build/daukle/migrate/old/$kept" ] || { fail "$label" "$kept was not kept"; return 1; }
+    done < "$case_dir/expect-kept.txt"
+  fi
+  if [ -f "$case_dir/task-after.txt" ]; then
+    task=$(cat "$case_dir/task-after.txt")
+    (cd "$sandbox" && "$daukle" "$task" >stdout.txt 2>stderr.txt) || { fail "$label" "$task failed after migrating"; sed -n '1,40p' "$sandbox/stderr.txt" >&2; return 1; }
+    cat "$sandbox/stdout.txt" "$sandbox/stderr.txt" > "$sandbox/both.txt"
+    grep_clauses_in "$sandbox/both.txt" "$case_dir/expect-task-output.txt" || return 1
+  fi
+  return 0
 }
 
 # Every non-empty line of the file is one clause, all of which must be present
@@ -178,6 +253,22 @@ run_sync_case() {
 run_case() {
   case_dir=$1
   name=$(basename "$case_dir")
+
+  if [ -f "$case_dir/migrate" ]; then
+    label="$name/migrate"
+    if [ -f "$case_dir/needs-node" ] && [ "${DAUKLE_NODE_E2E:-}" != "1" ]; then
+      echo "skip $label: set DAUKLE_NODE_E2E=1 to run it here" >&2
+      skipped=$((skipped + 1))
+      return 0
+    fi
+    sandbox="$work/$name-migrate"
+    rm -rf "$sandbox"
+    mkdir -p "$(dirname "$sandbox")"
+    cp -R "$case_dir" "$sandbox"
+    (cd "$sandbox" && rm -f migrate needs-node expect-*.txt task-after.txt)
+    run_migrate_case && passed=$((passed + 1))
+    return 0
+  fi
 
   # daukle.lua is included because core accepts one as the PRIMARY manifest when
   # no daukle.toml sits beside it, and the chunk that registers a task per

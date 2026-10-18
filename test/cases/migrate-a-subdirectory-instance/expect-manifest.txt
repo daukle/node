@@ -1,0 +1,2 @@
+[toolchains.node-web]
+dir = "web"
