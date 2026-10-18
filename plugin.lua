@@ -1,6 +1,6 @@
 daukle.plugin{
-  api = 1,
-  uses = { "provision", "exec", "read", "parse" },
+  api = 3,
+  uses = { "provision", "exec", "read", "parse", "write", "json_parse" },
   exports = { "lib/runtimes" },
 }
 
@@ -166,3 +166,7 @@ for _, script in ipairs(document ~= nil and scripts.task_scripts(document) or {}
     run = run_script(script.name),
   }
 end
+
+local migrator = daukle.require("lib/migrator")
+
+daukle.migrator{ tool = "npm", toolchain = "node", run = migrator.run, build = migrator.build }
