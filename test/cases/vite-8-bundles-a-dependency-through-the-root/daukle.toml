@@ -1,0 +1,26 @@
+schema = 1
+project = "daukle/node-test"
+version = "1.0.0"
+
+[modules]
+
+[plugins]
+node = "./plugins/node"
+
+# vite 8 bundles with Rolldown, whose resolver is native and walks up from the
+# importing file, so only a root node_modules can reach semver.
+[toolchains.node]
+version = "26.3.1"
+type = "module"
+
+  [toolchains.node.packages]
+  semver = "7.6.3"
+
+  [toolchains.node.devPackages]
+  vite = "8.3.4"
+
+  [toolchains.node.scripts]
+  build = [
+    { bin = "vite", args = ["build"] },
+    { module = "src/bundled.mjs" },
+  ]
