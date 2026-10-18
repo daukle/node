@@ -5,7 +5,7 @@
 // absent and every specifier must fail.
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdirSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { basename, dirname, join, resolve as resolvePath } from "node:path";
 
@@ -15,7 +15,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolvePath(here, "..", "..");
 const modules = join(projectRoot, "fixtures", "modules", "node_modules");
 const derived = join(projectRoot, "build", "daukle", "node");
-const nativeRoot = join(projectRoot, "native");
+const nativeRoot = join(projectRoot, "build", "native");
 // Outside the project root on purpose: the resolver's gate is a test on the
 // project a module was imported from, so a project inside this one would not
 // exercise it at all.
@@ -26,6 +26,14 @@ const failures = [];
 
 function check(what, condition, detail) {
   if (!condition) failures.push(what + ": " + detail);
+}
+
+/** @implNote node:install links a node_modules at the project root, from which node resolves every specifier natively, so it is moved aside while the resolver is measured. */
+function hideThePlacedNodeModules() {
+  const placed = join(projectRoot, "node_modules");
+  const aside = join(projectRoot, "node_modules.aside");
+  renameSync(placed, aside);
+  process.on("exit", () => renameSync(aside, placed));
 }
 
 function stageTrees() {
@@ -62,6 +70,7 @@ function runNode(script, environment, workingDirectory) {
                       { env: environment, encoding: "utf8", cwd: workingDirectory });
 }
 
+hideThePlacedNodeModules();
 stageTrees();
 
 const underResolver = await report();
