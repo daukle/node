@@ -2,7 +2,7 @@
      reachable. A package.json carries a scripts map and this toolchain modelled
      one "entry", so a project with two of them had one task. ]]
 
-local LIFECYCLE_TASKS = { install = true, run = true }
+local LIFECYCLE_TASKS = { install = true, run = true, tree = true }
 
 local STEP_KINDS = { module = true, bin = true, script = true }
 

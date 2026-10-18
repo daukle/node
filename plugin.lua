@@ -9,6 +9,7 @@ local scripts = daukle.require("lib/scripts")
 local runners = daukle.require("lib/runners")
 local settings = daukle.require("lib/settings")
 local paths = daukle.require("lib/paths")
+local tree = daukle.require("lib/tree")
 
 daukle.toolchain{
   name = "node",
@@ -19,6 +20,7 @@ daukle.toolchain{
       ["package.json"] = settings.package_json(spec),
       [runners.RESOLVER_NAME] = runners.resolver_for(spec.type),
       [runners.BIN_RUNNER_NAME] = runners.BIN_RUNNER,
+      [tree.SCRIPT_NAME] = tree.SCRIPT,
     }
   end,
 }
@@ -47,6 +49,16 @@ daukle.task{
     local spec = settings.read(context)
     local root, pick = provision_node(context, spec)
     daukle.exec(root:tool(pick.node), { root:path(pick.npm), "install" })
+  end,
+}
+
+daukle.task{
+  name = "node:tree",
+  dependsOn = { "node:install" },
+  run = function(context)
+    local spec = settings.read(context)
+    local root, pick = provision_node(context, spec)
+    daukle.exec(root:tool(pick.node), { "./" .. tree.SCRIPT_NAME })
   end,
 }
 
