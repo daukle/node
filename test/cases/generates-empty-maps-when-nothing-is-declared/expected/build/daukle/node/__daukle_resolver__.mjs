@@ -1,4 +1,5 @@
-import { createRequire, registerHooks } from "node:module";
+import Module, { createRequire, registerHooks } from "node:module";
+import { readFileSync } from "node:fs";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { dirname, join, resolve as resolvePath } from "node:path";
 
@@ -13,6 +14,19 @@ const projectFormat = null;
 function isProjectJavaScript(url) {
   return projectFormat !== null && url.startsWith(projectUnder) && !url.startsWith(installedUnder)
     && !url.includes("/node_modules/") && url.endsWith(".js");
+}
+
+const loadJavaScriptNatively = Module._extensions[".js"];
+
+function compileAsCommonJs(module, filename) {
+  module._compile(readFileSync(filename, "utf8"), filename);
+}
+
+if (projectFormat === "commonjs") {
+  Module._extensions[".js"] = function (module, filename) {
+    if (isProjectJavaScript(pathToFileURL(filename).href)) return compileAsCommonJs(module, filename);
+    return loadJavaScriptNatively(module, filename);
+  };
 }
 
 function isBare(specifier) {
