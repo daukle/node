@@ -1,8 +1,9 @@
 # daukle/node
 
 The Node toolchain, in managed mode. It provisions a runtime, generates a `package.json` into the
-derived directory, and drives the npm that runtime bundles. **No file of any kind is written at the
-project root.**
+derived directory, and drives the npm that runtime bundles. `node:install` places two entries at
+the package root so that a tool which resolves `node_modules` or reads `package.json` itself finds
+them, and nothing else is written there.
 
 ## Declaring it
 
@@ -29,7 +30,45 @@ package, sorted, to `build/daukle/node/dependency-tree.txt` and to the terminal.
 
 A module of yours, run by `node:run` or a script, has the package root as its working directory: the
 directory of the instance (`dir`), or the project root. A relative path in a module means what it
-meant under npm. Only `node:install` and `node:tree` work in the generated directory.
+meant under npm. Only `node:install` and `node:tree` work in the generated directory, and `node:tree`
+installs on its own rather than depending on `node:install`.
+
+## What `node:install` places at the package root
+
+Some tools do not go through node's module hooks: `tsc`, `vite`, `jest`, `webpack`, `eslint` and
+`prettier` resolve `node_modules` or read `package.json` on their own. They need both at the package
+root, so `node:install` places them there, even when nothing is declared:
+
+| entry | what it is |
+| --- | --- |
+| `node_modules` | a link into `build/daukle/<instance>/node_modules`: a junction on Windows, a directory symlink elsewhere |
+| `package.json` | a COPY of the generated file, never a link. Its first key is `"//"`, a sentence saying daukle generates it, and it carries the toolchain's `type` |
+
+Where a link is refused (`EPERM`, `ENOTSUP`, `EOPNOTSUPP` or `EINVAL`), or `DAUKLE_NODE_LINK=copy` is set,
+`node_modules` becomes a copy marked by a `.daukle-copy` file, and the next `node:install` replaces
+it. The bytes placed as `package.json` are kept in `build/daukle/<instance>/__daukle_placed__.json`,
+which is how an old copy is told from an edited one.
+
+**Add both to the project's `.gitignore`**: `node_modules` and `/package.json`. Write `node_modules`
+with no trailing slash: git classifies a symlink as a file, so `node_modules/`, which matches only
+directories, does not ignore the link on Linux or macOS. They are generated,
+and `daukle migrate` blocks a project whose `.gitignore` files, read from the project root down to
+the package root, do not ignore both, naming the line to add. `.git/info/exclude` and a global
+excludes file are not read.
+
+**`node:install` refuses, and changes nothing, when:**
+
+- a real `node_modules` or `package.json` sits at the package root that daukle did not place. Remove
+  it: the packages are installed into `build/daukle/<instance>/node_modules`. A project with either,
+  which `daukle/node` 2.0.x ignored, is refused from 2.1.0.
+- the root `node_modules` is a link pointing elsewhere, even one whose target is missing. When it
+  points into another instance's `build/daukle/` the message says two node toolchains cannot share
+  one package root.
+- the root `package.json` was edited. `node:install` replaces it on every run, so move the change
+  into `daukle.toml`.
+
+Messages name project-relative paths. A second `node` instance in one package root is refused too,
+for the same reason.
 
 ## A script per task, instead of one entry point
 
@@ -94,6 +133,8 @@ toolchain cannot.
 - Dependencies npm cannot install as declared, with no lockfile and no project `.npmrc`: a version
   that does not exist, or a peer conflict. The blocker carries npm's own error. An install that
   fails for the host's reasons, such as an unreachable registry, is an error, not a blocker.
+- A project whose `.gitignore` files do not ignore `node_modules` and `/package.json`, which
+  `node:install` places at the package root. The report names the line to add.
 - A `package.json` below the package root, in any directory but `node_modules`, `.git` and the
   derived `build/daukle`, and a directory that search cannot list.
 - Lifecycle scripts, and a `pre<x>` or `post<x>` beside an `<x>`.
@@ -111,6 +152,11 @@ ranges now resolve to fails the proof: the report says the build differs and giv
 both trees are printed so you can compare them. Run `npm update` first to migrate what you would get
 today.
 
+**After migrating, untrack the old `package.json`.** It was almost certainly committed, and git
+applies ignore rules only to untracked files, so the first `node:install` rewrites a tracked file and
+`git commit -a` would commit the generated copy. Run `git rm --cached package.json` (and
+`git rm -r --cached node_modules` if `node_modules` was tracked), then commit.
+
 ## `node` and `npm` are two halves of one language
 
 They are easy to confuse and they are not alternatives:
@@ -122,9 +168,11 @@ They are easy to confuse and they are not alternatives:
 
 They are two repositories because core refuses one chunk to hold both a toolchain and a language.
 
-## How module resolution works without a root file
+## How module resolution works
 
-A resolve hook in the derived directory, delivered through `NODE_OPTIONS`.
+A resolve hook in the derived directory, delivered through `NODE_OPTIONS`. It serves everything that
+goes through node's own module hooks, so a dependency resolves without any root entry; the entries
+above are for the tools that bypass them.
 
 **Three of its four guards are silent when wrong**: a regression produces a working build that
 loaded the wrong module. Every one is proved by mutation in this plugin's own suite, so any edit to

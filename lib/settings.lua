@@ -1,5 +1,6 @@
 local runtimes = daukle.require("lib/runtimes")
 local scripts = daukle.require("lib/scripts")
+local links = daukle.require("lib/links")
 
 local KNOWN_KEYS = { version = true, entry = true, packages = true, devPackages = true,
                      scripts = true, type = true }
@@ -132,7 +133,10 @@ end
      up in npm's output as if it had. "private" is what stops npm asking for the
      name and the version a publishable package needs. ]]
 local function package_json(spec)
+  local type_line = spec.type == nil and "" or ('  "type": "' .. spec.type .. '",\n')
   return '{\n'
+    .. '  "' .. links.MARKER_KEY .. '": "' .. links.MARKER_TEXT .. '",\n'
+    .. type_line
     .. '  "private": true,\n'
     .. '  "dependencies": ' .. json_object(spec.packages, spec.package_ranges, "  ") .. ',\n'
     .. '  "devDependencies": ' .. json_object(spec.dev_packages, spec.dev_ranges, "  ") .. '\n'

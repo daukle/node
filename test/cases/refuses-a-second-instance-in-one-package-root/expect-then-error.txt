@@ -1,0 +1,3 @@
+"node_modules" links to "build/daukle/node/node_modules"
+not to this toolchain's "build/daukle/node-two/node_modules"
+two node toolchains cannot share one package root
