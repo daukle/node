@@ -18,13 +18,13 @@ function isProjectJavaScript(url) {
 
 const loadJavaScriptNatively = Module._extensions[".js"];
 
-function compileAsCommonJs(module, filename) {
-  module._compile(readFileSync(filename, "utf8"), filename, "commonjs");
+function compileInProjectFormat(module, filename) {
+  module._compile(readFileSync(filename, "utf8"), filename, projectFormat);
 }
 
-if (projectFormat === "commonjs") {
+if (projectFormat !== null) {
   Module._extensions[".js"] = function (module, filename) {
-    if (isProjectJavaScript(pathToFileURL(filename).href)) return compileAsCommonJs(module, filename);
+    if (isProjectJavaScript(pathToFileURL(filename).href)) return compileInProjectFormat(module, filename);
     return loadJavaScriptNatively(module, filename);
   };
 }
@@ -70,23 +70,25 @@ if (!inheritedOptions) {
 
 let resolving = false;
 
+function resolveSpecifier(specifier, context, nextResolve) {
+  if (resolving || !namesAPackage(specifier) || !belongsToThisProject(context.parentURL)) {
+    return nextResolve(specifier, context);
+  }
+  if (hasCondition(context.conditions, "import")) {
+    return nextResolve(specifier, { ...context, parentURL: asIfImportedFrom });
+  }
+  resolving = true;
+  try {
+    return { url: pathToFileURL(requireFromDerived.resolve(specifier)).href, shortCircuit: true };
+  } finally {
+    resolving = false;
+  }
+}
+
 registerHooks({
-  load(url, context, nextLoad) {
-    if (isProjectJavaScript(url)) return nextLoad(url, { ...context, format: projectFormat });
-    return nextLoad(url, context);
-  },
   resolve(specifier, context, nextResolve) {
-    if (resolving || !namesAPackage(specifier) || !belongsToThisProject(context.parentURL)) {
-      return nextResolve(specifier, context);
-    }
-    if (hasCondition(context.conditions, "import")) {
-      return nextResolve(specifier, { ...context, parentURL: asIfImportedFrom });
-    }
-    resolving = true;
-    try {
-      return { url: pathToFileURL(requireFromDerived.resolve(specifier)).href, shortCircuit: true };
-    } finally {
-      resolving = false;
-    }
+    const resolved = resolveSpecifier(specifier, context, nextResolve);
+    if (isProjectJavaScript(resolved.url)) return { ...resolved, format: projectFormat };
+    return resolved;
   },
 });
