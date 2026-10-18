@@ -2,6 +2,7 @@ local runtimes = daukle.require("lib/runtimes")
 local translate = daukle.require("lib/translate")
 local tree = daukle.require("lib/tree")
 local paths = daukle.require("lib/paths")
+local npm_errors = daukle.require("lib/npm_errors")
 
 local PROBE_NAME = "__daukle_probe__.mjs"
 
@@ -16,7 +17,8 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const exists = {};
-for (const name of ["package-lock.json", "npm-shrinkwrap.json", "node_modules", ".npmrc", ".nvmrc", ".node-version"]) {
+for (const name of ["package-lock.json", "npm-shrinkwrap.json", "node_modules", ".npmrc", ".nvmrc", ".node-version",
+                    "yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb"]) {
   exists[name] = existsSync(name);
 }
 
@@ -101,19 +103,31 @@ local function result(context, config, blockers, owned)
   }
 end
 
+local PROBE_IDENTITY ='"name": "daukle-migrate-probe", "version": "0.0.0"'
+
+--[[ @implNote the probe script still runs after a failed install, because the
+     existence and nested-package facts need no node_modules and are often the
+     real reason the install failed (a yarn.lock or .npmrc it would have read). ]]
 local function probe(context, config)
   local root, pick = provision(context, config.version)
-  daukle.write{ path = "migrate-probe/package.json", text = '{"private": true, "dependencies": '
-                .. json_object(config.packages) .. ', "devDependencies": '
-                .. json_object(config.devPackages) .. '}\n' }
+  daukle.write{ path = "migrate-probe/package.json", text = '{' .. PROBE_IDENTITY
+                .. ', "private": true, "dependencies": ' .. json_object(config.packages)
+                .. ', "devDependencies": ' .. json_object(config.devPackages) .. '}\n' }
   daukle.write{ path = "migrate-probe/" .. PROBE_NAME, text = PROBE }
-  daukle.exec(root:tool(pick.node), { root:path(pick.npm), "install", "--ignore-scripts",
-                                      "--include=dev" },
-              { cwd = derived(context, "migrate-probe") })
+  local install = daukle.exec(root:tool(pick.node), { root:path(pick.npm), "install",
+                                                      "--ignore-scripts", "--include=dev" },
+                              { cwd = derived(context, "migrate-probe"), capture = true,
+                                check = false })
+  local unresolved = nil
+  if install.code ~= 0 then
+    local failure = npm_errors.of_install(install.stderr, install.code)
+    if not failure.resolution then error("npm install failed: " .. failure.message, 0) end
+    unresolved = failure.message
+  end
   local answer = daukle.exec(root:tool(pick.node),
                              { paths.climb_from(context.dir) .. derived(context, "migrate-probe/" .. PROBE_NAME) },
                              { cwd = context.dir or ".", capture = true })
-  return daukle.json_parse(answer.stdout)
+  return daukle.json_parse(answer.stdout), unresolved
 end
 
 local NPM_CONFIGURATION = "configures npm in a way this toolchain does not carry over"
@@ -124,6 +138,12 @@ local NESTED_PACKAGE = "is a package.json below the package root, which node rea
                        .. " and resolution of the files under it, and which the toolchain's"
                        .. " declared type would override"
 local NESTED_ROW = "2. Module resolution: a nested `package.json` below the package root"
+local UNRESOLVED_ROW = "3. Dependencies: the declared dependencies do not resolve"
+
+local FOREIGN_LOCKFILE = "pins this project's dependencies for another package manager, and the"
+                         .. " migration would install with npm and drop those pins"
+local FOREIGN_LOCKFILE_ROW = "4. Install, lockfile and registry configuration: another package"
+                             .. " manager's lockfile (`yarn.lock`, `pnpm-lock.yaml`, `bun.lock`, `bun.lockb`)"
 
 local REFUSED_FILES = {
   { name = "npm-shrinkwrap.json", why = NPM_CONFIGURATION,
@@ -132,6 +152,10 @@ local REFUSED_FILES = {
     row = "4. Install, lockfile and registry configuration: a project `.npmrc`: scoped registries, `_authToken`, `${VAR}`" },
   { name = ".nvmrc", why = VERSION_MANAGER, row = "1. The runtime" },
   { name = ".node-version", why = VERSION_MANAGER, row = "1. The runtime" },
+  { name = "yarn.lock", why = FOREIGN_LOCKFILE, row = FOREIGN_LOCKFILE_ROW },
+  { name = "pnpm-lock.yaml", why = FOREIGN_LOCKFILE, row = FOREIGN_LOCKFILE_ROW },
+  { name = "bun.lock", why = FOREIGN_LOCKFILE, row = FOREIGN_LOCKFILE_ROW },
+  { name = "bun.lockb", why = FOREIGN_LOCKFILE, row = FOREIGN_LOCKFILE_ROW },
 }
 
 local function run(context)
@@ -140,8 +164,15 @@ local function run(context)
   if #translation.blockers > 0 then
     return result(context, translation.config, translation.blockers, { where })
   end
-  local facts = probe(context, translation.config)
-  local blockers = translate.resolve_commands(translation.config, facts.bins, where)
+  local facts, unresolved = probe(context, translation.config)
+  local blockers
+  if unresolved ~= nil then
+    blockers = { { construct = "package.json", where = where,
+                   why = "npm install could not resolve the declared dependencies: " .. unresolved,
+                   surface = "NPM-SURFACE.md: " .. UNRESOLVED_ROW } }
+  else
+    blockers = translate.resolve_commands(translation.config, facts.bins, where)
+  end
   for _, refused in ipairs(REFUSED_FILES) do
     if facts.exists[refused.name] then
       blockers[#blockers + 1] = { construct = refused.name, where = within(context.dir, refused.name),
@@ -167,7 +198,8 @@ end
 local function build(context)
   local where = within(context.dir, "package.json")
   local translation = translate.package(daukle.read(where), where)
-  local facts = probe(context, translation.config)
+  local facts, unresolved = probe(context, translation.config)
+  if unresolved ~= nil then error("npm install failed: " .. unresolved, 0) end
   local root, pick = provision(context, translation.config.version)
   daukle.write{ path = "migrate-old/package.json", text = daukle.read(where) }
   local install = { root:path(pick.npm), "install", "--ignore-scripts" }

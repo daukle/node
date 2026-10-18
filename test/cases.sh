@@ -117,7 +117,10 @@ grep_clauses_in() {
 run_migrate_case() {
   serve_plugin || return 1
   status=0
-  (cd "$sandbox" && "$daukle" migrate --catalog "$catalog" >stdout.txt 2>stderr.txt) || status=$?
+  # env.txt holds NAME=value lines exported to migrate alone, which is how a case
+  # points npm at a registry that refuses, without touching the host's npm.
+  (cd "$sandbox" && { [ ! -f "$case_dir/env.txt" ] || { set -a; . "$case_dir/env.txt"; set +a; }; } &&
+    "$daukle" migrate --catalog "$catalog" >stdout.txt 2>stderr.txt) || status=$?
   wanted=$(cat "$case_dir/expect-exit.txt")
   if [ "$status" -ne "$wanted" ]; then
     fail "$label" "migrate exited $status, wanted $wanted"
@@ -314,7 +317,7 @@ run_case() {
     rm -rf "$sandbox"
     mkdir -p "$(dirname "$sandbox")"
     cp -R "$case_dir" "$sandbox"
-    (cd "$sandbox" && rm -f migrate needs-node expect-*.txt task-after.txt)
+    (cd "$sandbox" && rm -f migrate needs-node expect-*.txt task-after.txt env.txt)
     run_migrate_case && passed=$((passed + 1))
     return 0
   fi
