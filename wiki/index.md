@@ -152,6 +152,11 @@ ranges now resolve to fails the proof: the report says the build differs and giv
 both trees are printed so you can compare them. Run `npm update` first to migrate what you would get
 today.
 
+**After migrating, untrack the old `package.json`.** It was almost certainly committed, and git
+applies ignore rules only to untracked files, so the first `node:install` rewrites a tracked file and
+`git commit -a` would commit the generated copy. Run `git rm --cached package.json` (and
+`git rm -r --cached node_modules` if `node_modules` was tracked), then commit.
+
 ## `node` and `npm` are two halves of one language
 
 They are easy to confuse and they are not alternatives:

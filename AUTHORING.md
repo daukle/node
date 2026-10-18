@@ -192,7 +192,10 @@ a form ending in a slash: git classifies a POSIX symlink as a file, so a directo
 not ignore it (measured in WSL; Git for Windows treats a junction as a directory, so the Windows
 runners cannot see this). `git-ignores-the-placed-root-entries` asks git itself. A negated line with
 a wildcard or the entry's name counts as un-ignoring it, and leading whitespace stays part of the
-pattern, as git keeps it: both fail closed.
+pattern, as git keeps it: both fail closed. Ignore rules do not apply to a tracked file, and a
+migrated project's old `package.json` almost always is one, so the wiki tells the user to run
+`git rm --cached package.json` (and `git rm -r --cached node_modules` if it was tracked) and commit;
+a plugin cannot run git, and core prints no plugin text after a migration.
 
 **`node:tree` does not place them.** Core runs the migration proof (`<instance>:tree`) before it moves
 the old `package.json` aside (`fr_migrate_finish`, `src/migrate/migrate_finish.c`), so the proof
