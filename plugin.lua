@@ -8,6 +8,7 @@ local runtimes = daukle.require("lib/runtimes")
 local scripts = daukle.require("lib/scripts")
 local runners = daukle.require("lib/runners")
 local settings = daukle.require("lib/settings")
+local paths = daukle.require("lib/paths")
 
 daukle.toolchain{
   name = "node",
@@ -49,14 +50,24 @@ daukle.task{
   end,
 }
 
--- Relative, and correct because a task's working directory is the derived
--- directory the resolver was generated into. The resolver itself is what hands
--- descendants the absolute form, since context.root is "../../.." and a plugin
--- has no absolute path to the project at all.
-local function run_module(root, pick, module_path, args)
-  local argv = { "--import", "./" .. runners.RESOLVER_NAME, module_path }
+local function package_root(context)
+  return string.match(context.root, "^%.%./%.%./%.%./(.+)$") or "."
+end
+
+local function derived_from_package_root(context)
+  return paths.climb_from(package_root(context)) .. "build/daukle/" .. context.toolchain.name
+end
+
+--[[ @implNote --import is resolved against the working directory, which is the
+     package root here, so the resolver is named relative to it and starts with
+     "./" or "../" to stay a relative URL rather than a bare specifier. ]]
+local function run_module(context, root, pick, module_path, args)
+  local derived = derived_from_package_root(context)
+  local resolver = (string.sub(derived, 1, 3) == "../" and "" or "./") .. derived .. "/"
+                   .. runners.RESOLVER_NAME
+  local argv = { "--import", resolver, module_path }
   for index = 1, #args do argv[#argv + 1] = args[index] end
-  daukle.exec(root:tool(pick.node), argv)
+  daukle.exec(root:tool(pick.node), argv, { cwd = package_root(context) })
 end
 
 local function refuse_a_project_with_no_entry(spec)
@@ -77,7 +88,7 @@ daukle.task{
     local spec = settings.read(context)
     refuse_a_project_with_no_entry(spec)
     local root, pick = provision_node(context, spec)
-    run_module(root, pick, context.root .. "/" .. spec.entry, {})
+    run_module(context, root, pick, spec.entry, {})
   end,
 }
 
@@ -94,12 +105,12 @@ local function run_steps(context, spec, script)
       end
     elseif step.kind == "module" then
       local root, pick = provision_node(context, spec)
-      run_module(root, pick, context.root .. "/" .. step.name, step.args)
+      run_module(context, root, pick, step.name, step.args)
     else
       local root, pick = provision_node(context, spec)
       local argv = { step.name, step.binName or "" }
       for at = 1, #step.args do argv[#argv + 1] = step.args[at] end
-      run_module(root, pick, "./" .. runners.BIN_RUNNER_NAME, argv)
+      run_module(context, root, pick, derived_from_package_root(context) .. "/" .. runners.BIN_RUNNER_NAME, argv)
     end
   end
 end
