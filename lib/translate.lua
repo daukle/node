@@ -40,7 +40,7 @@ local ABSENT_FIELDS = {
   bundledDependencies = "3. Dependencies: `bundleDependencies`",
   overrides = "3. Dependencies: `overrides`",
   workspaces = SURFACE.workspaces,
-  bin ="7. Packing and publishing: the project's own `bin`",
+  bin = "7. Packing and publishing: the project's own `bin`",
   exports = SURFACE.main,
   imports = "2. Module resolution: the project's own `\"imports\"`, `#`-specifiers",
   files = "7. Packing and publishing: `files`, `.npmignore`",
@@ -107,15 +107,16 @@ local function dependency_map(package, key, where, blockers)
   for _, name in ipairs(sorted_keys(map)) do
     local range = map[name]
     local name_problem = settings.package_name_problem(name)
+    local protocol = type(range) == "string" and workspace_protocol_of(range) or nil
     if name_problem ~= nil then
       blocker(blockers, key .. '."' .. name .. '"', where, name_problem, SURFACE.dependencies)
     elseif type(range) == "string" and is_local_path(range) then
       blocker(blockers, key .. '."' .. name .. '"', where, string.format('is "%s", a local path'
               .. ' npm would resolve against the generated package.json\'s directory rather than'
               .. ' this one', range), SURFACE.local_path)
-    elseif type(range) == "string" and workspace_protocol_of(range) ~= nil then
+    elseif protocol ~= nil then
       blocker(blockers, key .. '."' .. name .. '"', where, string.format('is "%s", %s, and this'
-              .. ' toolchain has no workspaces', range, workspace_protocol_of(range).what),
+              .. ' toolchain has no workspaces', range, protocol.what),
               SURFACE.workspaces)
     elseif type(range) ~= "string"
            or not string.match(range, '^[%w%s%.%-%+%*|<>=~^%(%)/:#@]+$') then
