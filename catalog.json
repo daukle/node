@@ -2,5 +2,6 @@
   "detect": [
     { "files": ["package.json"], "contains": ["\"scripts\"%s*:"], "scope": "tree" }
   ],
-  "replaces": {}
+  "replaces": {},
+  "skip": ["node_modules"]
 }
