@@ -1,0 +1,5 @@
+workspaces
+.npmrc
+yarn.lock
+scripts/package.json
+x..y/package.json

@@ -1,6 +1,6 @@
 daukle.plugin{
   api = 3,
-  uses = { "provision", "exec", "read", "parse", "write", "json_parse" },
+  uses = { "provision", "exec", "read", "parse", "write", "json_parse", "list" },
   exports = { "lib/runtimes" },
 }
 
