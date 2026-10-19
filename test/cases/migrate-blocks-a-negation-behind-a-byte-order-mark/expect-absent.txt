@@ -1,0 +1,1 @@
+does not ignore /package.json

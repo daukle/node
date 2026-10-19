@@ -193,10 +193,14 @@ root down to the package root, do not ignore `node_modules` and `/package.json`.
 `node_modules`, `**/node_modules`, `/node_modules` and `/<dir>/node_modules` from an ancestor, never
 a form ending in a slash: git classifies a POSIX symlink as a file, so a directory-only pattern does
 not ignore it (measured in WSL; Git for Windows treats a junction as a directory, so the Windows
-runners cannot see this). `git-ignores-the-placed-root-entries` asks git itself. A negated line with
-a wildcard or the entry's name counts as un-ignoring it, and leading whitespace stays part of the
-pattern, as git keeps it: both fail closed. Ignore rules do not apply to a tracked file, and a
-migrated project's old `package.json` almost always is one, so the wiki tells the user to run
+runners cannot see this). `git-ignores-the-placed-root-entries` asks git itself. A negated line counts
+as un-ignoring an entry when its glob could match it (`*`, `?` and `**`, case ignored, a trailing
+slash ignored), and always when it holds an escape or a bracket class, so `!*.md` passes and
+`!*.json` blocks `package.json`; the blocker then names that negation rather than asking for a line
+that is already there. Leading whitespace and every trailing character but an unescaped space stay
+part of the pattern, as git keeps them, and a leading byte-order mark is dropped, as git drops it.
+Every doubtful reading fails closed. Ignore rules do not apply to a tracked file, and a migrated
+project's old `package.json` almost always is one, so the wiki tells the user to run
 `git rm --cached package.json` (and `git rm -r --cached node_modules` if it was tracked) and commit;
 a plugin cannot run git, and core prints no plugin text after a migration.
 

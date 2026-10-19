@@ -52,24 +52,47 @@ const ROOT_ENTRIES = [
   { fact: "package_json", name: "package.json",
     forms: (prefixFromIgnoreFile) => ["package.json", "**/package.json", "/" + prefixFromIgnoreFile + "package.json"] },
 ];
-/** @implNote any negation that could reach the entry, by a wildcard or by naming it, clears the fact without being matched: a false "ignored" lets generated files be committed, a false "not ignored" costs the user one line. */
-function mayUnignore(pattern, entry) {
-  return /[*?[]/.test(pattern) || pattern.includes(entry.name);
+const reincludedBy = {};
+function globSource(glob) {
+  let source = "";
+  for (let index = 0; index < glob.length; index++) {
+    if (glob.startsWith("**/", index)) { source += "(?:.*/)?"; index += 2; }
+    else if (glob.startsWith("/**", index) && index + 3 === glob.length) { source += "/.*"; index += 2; }
+    else if (glob[index] === "*") source += "[^/]*";
+    else if (glob[index] === "?") source += "[^/]";
+    else source += glob[index].replace(/[.+^${}()|\]]/g, "\\$&");
+  }
+  return source;
+}
+/** @implNote errs toward "may": an escape or a bracket class is not matched at all, a trailing slash is ignored although a POSIX link is a file, and case is ignored because a Windows or macOS checkout does. A false "may" costs the user one line; a false "cannot" lets generated files be committed. */
+function mayUnignore(pattern, entry, prefixFromIgnoreFile) {
+  if (/[\\[]/.test(pattern)) return true;
+  const glob = pattern.replace(/\/+$/, "").replace(/^\//, "");
+  const path = glob.includes("/") ? prefixFromIgnoreFile + entry.name : entry.name;
+  return new RegExp("^" + globSource(glob) + "$", "i").test(path);
 }
 function readIgnoreLines(path) {
-  try { return readFileSync(path, "utf8").split("\n"); }
+  try { return readFileSync(path, "utf8").replace(/^\uFEFF/, "").split("\n"); }
   catch (error) { if (error.code === "ENOENT") return []; throw error; }
 }
-/** @implNote only the end of a line is trimmed, because git keeps leading whitespace as part of the pattern. */
+/** @implNote git keeps leading whitespace and every trailing character but an unescaped space, a tab included. */
+function patternLine(raw) {
+  return raw.replace(/\r$/, "").replace(/(?<!\\) +$/, "");
+}
 function applyIgnore(path, prefixFromIgnoreFile) {
   for (const raw of readIgnoreLines(path)) {
-    const line = raw.trimEnd();
+    const line = patternLine(raw);
     if (line === "" || line.startsWith("#")) continue;
     const negated = line.startsWith("!");
     const pattern = negated ? line.slice(1) : line;
     for (const entry of ROOT_ENTRIES) {
-      if (negated && mayUnignore(pattern, entry)) ignored[entry.fact] = false;
-      else if (!negated && entry.forms(prefixFromIgnoreFile).includes(pattern)) ignored[entry.fact] = true;
+      if (negated && mayUnignore(pattern, entry, prefixFromIgnoreFile)) {
+        ignored[entry.fact] = false;
+        reincludedBy[entry.fact] = { line, file: path };
+      } else if (!negated && entry.forms(prefixFromIgnoreFile).includes(pattern)) {
+        ignored[entry.fact] = true;
+        delete reincludedBy[entry.fact];
+      }
     }
   }
 }
@@ -83,6 +106,8 @@ try {
 } catch {
   ignored.node_modules = false;
   ignored.package_json = false;
+  delete reincludedBy.node_modules;
+  delete reincludedBy.package_json;
 }
 const own = JSON.parse(readFileSync(join(here, "package.json"), "utf8"));
 const bins = {};
@@ -96,7 +121,7 @@ for (const name of Object.keys({ ...own.dependencies, ...own.devDependencies }))
     : Object.keys(map ? manifest.bin : {});
   for (const command of commands) (bins[command] ??= []).push({ name, map });
 }
-process.stdout.write(JSON.stringify({ exists, bins, nested, unreadable, ignored }));
+process.stdout.write(JSON.stringify({ exists, bins, nested, unreadable, ignored, reincludedBy }));
 ]==]
 
 local function within(dir, name)
@@ -189,9 +214,15 @@ local FOREIGN_LOCKFILE_ROW = "4. Install, lockfile and registry configuration: a
 
 local ROOT_ENTRIES_ROW = "2. Module resolution: a tool that resolves `node_modules` or reads `package.json` itself"
 local ROOT_ENTRIES = {
-  { fact = "node_modules", line = "node_modules" },
-  { fact = "package_json", line = "/package.json" },
+  { fact = "node_modules", line = "node_modules", name = "node_modules", placed = "as a link to" },
+  { fact = "package_json", line = "/package.json", name = "package.json", placed = "as a copy of" },
 }
+
+local function root_entry_remedy(entry, reincluded)
+  if reincluded == nil then return "add the line " .. entry.line end
+  return "the negation " .. reincluded.line .. " in " .. reincluded.file .. " can re-include it:"
+         .. " remove that negation, or repeat " .. entry.line .. " below it"
+end
 
 local REFUSED_FILES = {
   { name = "npm-shrinkwrap.json", why = NPM_CONFIGURATION,
@@ -241,8 +272,9 @@ local function run(context)
     if not facts.ignored[entry.fact] then
       blockers[#blockers + 1] = { construct = ".gitignore", where = within(context.dir, ".gitignore"),
                                   why = "does not ignore " .. entry.line .. ", which node:install places at"
-                                        .. " the package root as links into build/daukle/" .. context.instance
-                                        .. ": add the line " .. entry.line,
+                                        .. " the package root " .. entry.placed .. " "
+                                        .. derived(context, entry.name) .. ": "
+                                        .. root_entry_remedy(entry, facts.reincludedBy[entry.fact]),
                                   surface = "NPM-SURFACE.md: " .. ROOT_ENTRIES_ROW }
     end
   end

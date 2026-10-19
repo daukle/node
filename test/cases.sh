@@ -35,6 +35,15 @@ fail() {
 
 # This plugin is multi-file, so the whole plugin directory is staged rather
 # than the single plugin.lua the other repositories copy.
+# A fixture's .gitignore would apply to this repository too, hiding the case's
+# own files from git, so a case carries it as "gitignore" and the sandbox
+# gives it back its dot.
+restore_ignore_files() {
+  find "$1" -type f -name gitignore | while IFS= read -r file; do
+    mv "$file" "$(dirname "$file")/.gitignore"
+  done
+}
+
 stage_plugin() {
   mkdir -p "$1/plugins/node"
   cp "$root/plugin.lua" "$1/plugins/node/plugin.lua"
@@ -423,6 +432,7 @@ run_case() {
     rm -rf "$sandbox"
     mkdir -p "$(dirname "$sandbox")"
     cp -R "$case_dir" "$sandbox"
+    restore_ignore_files "$sandbox"
     (cd "$sandbox" && rm -f migrate needs-node expect-*.txt task-after.txt env.txt)
     run_migrate_case && passed=$((passed + 1))
     return 0
@@ -450,6 +460,7 @@ run_case() {
     rm -rf "$sandbox"
     mkdir -p "$(dirname "$sandbox")"
     cp -R "$case_dir" "$sandbox"
+    restore_ignore_files "$sandbox"
     rm -rf "$sandbox/expected" "$sandbox/expect-error.txt" "$sandbox/task.txt" \
            "$sandbox/expect-task-error.txt" "$sandbox/expect-output.txt" \
            "$sandbox/unchanged.txt" "$sandbox/needs-node" \

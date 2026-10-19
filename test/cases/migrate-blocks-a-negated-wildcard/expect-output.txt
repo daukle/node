@@ -1,2 +1,3 @@
-add the line node_modules
-add the line /package.json
+does not ignore node_modules
+does not ignore /package.json
+the negation !* in .gitignore
