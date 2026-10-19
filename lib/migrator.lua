@@ -6,43 +6,14 @@ local npm_errors = daukle.require("lib/npm_errors")
 
 local PROBE_NAME = "__daukle_probe__.mjs"
 
---[[ @implNote existence is asked of node because daukle.read raises on a
-     missing file and the sandbox has no pcall, and a missing owned path is a
-     blocker in core. The bins are read from the probe's own install so that
-     the answer is npm's layout, not a guess from names. ]]
+--[[ @implNote the bins are read from the probe's own install so that the
+     answer is npm's layout, not a guess from names. ]]
 local PROBE = [==[
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const exists = {};
-for (const name of ["package-lock.json", "npm-shrinkwrap.json", "node_modules", ".npmrc", ".nvmrc", ".node-version",
-                    "yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb"]) {
-  exists[name] = existsSync(name);
-}
-
-const nested = [];
-const unreadable = [];
-function isSkipped(path, name) {
-  return name === "node_modules" || name === ".git" || path === "build/daukle";
-}
-function findNested(directory) {
-  let entries;
-  try { entries = readdirSync(directory || ".", { withFileTypes: true }); }
-  catch (error) { unreadable.push({ path: directory || ".", why: error.code || error.message }); return; }
-  for (const entry of entries) {
-    const path = directory ? directory + "/" + entry.name : entry.name;
-    if (entry.isDirectory()) {
-      if (isSkipped(path, entry.name)) continue;
-      findNested(path);
-    } else if (directory && entry.name === "package.json") {
-      nested.push(path);
-    }
-  }
-}
-findNested("");
-nested.sort();
 
 const ignored = { node_modules: false, package_json: false };
 /** @implNote no accepted form ends in a slash: git classifies a POSIX symlink as a file, so a directory-only pattern does not ignore the link node:install places (Git for Windows treats a junction as a directory, which hides this there). */
@@ -121,7 +92,7 @@ for (const name of Object.keys({ ...own.dependencies, ...own.devDependencies }))
     : Object.keys(map ? manifest.bin : {});
   for (const command of commands) (bins[command] ??= []).push({ name, map });
 }
-process.stdout.write(JSON.stringify({ exists, bins, nested, unreadable, ignored, reincludedBy }));
+process.stdout.write(JSON.stringify({ bins, ignored, reincludedBy }));
 ]==]
 
 local function within(dir, name)
@@ -172,8 +143,8 @@ end
 local PROBE_IDENTITY ='"name": "daukle-migrate-probe", "version": "0.0.0"'
 
 --[[ @implNote the probe script still runs after a failed install, because the
-     existence and nested-package facts need no node_modules and are often the
-     real reason the install failed (a yarn.lock or .npmrc it would have read). ]]
+     ignore facts need no node_modules and the report should carry them beside
+     the install failure. ]]
 local function probe(context, config)
   local root, pick = provision(context, config.version)
   daukle.write{ path = "migrate-probe/package.json", text = '{' .. PROBE_IDENTITY
@@ -237,21 +208,40 @@ local REFUSED_FILES = {
   { name = "bun.lockb", why = FOREIGN_LOCKFILE, row = FOREIGN_LOCKFILE_ROW },
 }
 
-local function run(context)
-  local where = within(context.dir, "package.json")
-  local translation = translate.package(daukle.read(where), where)
-  if #translation.blockers > 0 then
-    return result(context, translation.config, translation.blockers, { where })
+local SKIPPED_DIRECTORIES = { node_modules = true, [".git"] = true }
+
+local function below(relative, name)
+  if relative == "" then return name end
+  return relative .. "/" .. name
+end
+
+--[[ @implNote read with daukle.list rather than by the node probe, so these facts
+     are found even when translation already blocked and node is never fetched.
+     A link is never descended into, as the walk node made did not either. ]]
+local function file_facts(context)
+  local facts = { exists = {}, nested = {}, unreadable = {} }
+  local function walk(relative)
+    local entries, why = daukle.list(relative == "" and (context.dir or ".") or within(context.dir, relative))
+    if entries == nil then
+      if why ~= nil then facts.unreadable[#facts.unreadable + 1] = { path = relative == "" and "." or relative, why = why } end
+      return
+    end
+    for _, entry in ipairs(entries) do
+      local path = below(relative, entry.name)
+      if relative == "" then facts.exists[entry.name] = true end
+      if entry.kind == "directory" then
+        if not SKIPPED_DIRECTORIES[entry.name] and path ~= "build/daukle" then walk(path) end
+      elseif relative ~= "" and entry.name == "package.json" then
+        facts.nested[#facts.nested + 1] = path
+      end
+    end
   end
-  local facts, unresolved = probe(context, translation.config)
-  local blockers
-  if unresolved ~= nil then
-    blockers = { { construct = "package.json", where = where,
-                   why = "npm install could not resolve the declared dependencies: " .. unresolved,
-                   surface = "NPM-SURFACE.md: " .. UNRESOLVED_ROW } }
-  else
-    blockers = translate.resolve_commands(translation.config, facts.bins, where)
-  end
+  walk("")
+  table.sort(facts.nested)
+  return facts
+end
+
+local function file_blockers(context, facts, blockers)
   for _, refused in ipairs(REFUSED_FILES) do
     if facts.exists[refused.name] then
       blockers[#blockers + 1] = { construct = refused.name, where = within(context.dir, refused.name),
@@ -268,6 +258,26 @@ local function run(context)
                                       .. "), so a nested package.json in it cannot be ruled out",
                                 surface = "NPM-SURFACE.md: " .. NESTED_ROW }
   end
+  return blockers
+end
+
+local function run(context)
+  local where = within(context.dir, "package.json")
+  local files = file_facts(context)
+  local translation = translate.package(daukle.read(where), where)
+  if #translation.blockers > 0 then
+    return result(context, translation.config, file_blockers(context, files, translation.blockers), { where })
+  end
+  local facts, unresolved = probe(context, translation.config)
+  local blockers
+  if unresolved ~= nil then
+    blockers = { { construct = "package.json", where = where,
+                   why = "npm install could not resolve the declared dependencies: " .. unresolved,
+                   surface = "NPM-SURFACE.md: " .. UNRESOLVED_ROW } }
+  else
+    blockers = translate.resolve_commands(translation.config, facts.bins, where)
+  end
+  file_blockers(context, files, blockers)
   for _, entry in ipairs(ROOT_ENTRIES) do
     if not facts.ignored[entry.fact] then
       blockers[#blockers + 1] = { construct = ".gitignore", where = within(context.dir, ".gitignore"),
@@ -279,20 +289,21 @@ local function run(context)
     end
   end
   local owned = { where }
-  if facts.exists["package-lock.json"] then owned[#owned + 1] = within(context.dir, "package-lock.json") end
-  if facts.exists["node_modules"] then owned[#owned + 1] = within(context.dir, "node_modules") end
+  if files.exists["package-lock.json"] then owned[#owned + 1] = within(context.dir, "package-lock.json") end
+  if files.exists["node_modules"] then owned[#owned + 1] = within(context.dir, "node_modules") end
   return result(context, translation.config, blockers, owned)
 end
 
 local function build(context)
   local where = within(context.dir, "package.json")
   local translation = translate.package(daukle.read(where), where)
-  local facts, unresolved = probe(context, translation.config)
+  local _, unresolved = probe(context, translation.config)
   if unresolved ~= nil then error("npm install failed: " .. unresolved, 0) end
+  local files = file_facts(context)
   local root, pick = provision(context, translation.config.version)
   daukle.write{ path = "migrate-old/package.json", text = daukle.read(where) }
   local install = { root:path(pick.npm), "install", "--ignore-scripts" }
-  if facts.exists["package-lock.json"] then
+  if files.exists["package-lock.json"] then
     daukle.write{ path = "migrate-old/package-lock.json",
                   text = daukle.read(within(context.dir, "package-lock.json")) }
     install = { root:path(pick.npm), "ci", "--ignore-scripts" }

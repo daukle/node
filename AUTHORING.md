@@ -216,12 +216,16 @@ The design is `daukle/docs` `superpowers/specs/2026-10-18-npm-migrator-design.md
 what npm can do that this toolchain cannot is `daukle/docs` `NPM-SURFACE.md`; every blocker names
 one of its rows.
 
-- **`run` reads `package.json` with `daukle.read` and installs its dependencies into
+- **`run` first lists the package with `daukle.list`** (core `0.11.0`): which of
+  `package-lock.json`, `npm-shrinkwrap.json`, `node_modules`, `.npmrc`, `.nvmrc`, `.node-version`,
+  `yarn.lock`, `pnpm-lock.yaml`, `bun.lock` and `bun.lockb` exist, and every `package.json` below the
+  root, skipping `node_modules`, `.git`, `build/daukle` and every link. These need no node, so they
+  are reported even when translating `package.json` already blocked, and a project learns every
+  file blocker in one run. **Its `.gitignore` facts still come from the node probe**, so they appear
+  only once translation passes.
+- **`run` then reads `package.json` with `daukle.read` and installs its dependencies into
   `migrate-probe/`** with `--ignore-scripts`, to learn which direct dependency provides each command
-  a script runs and which of `package-lock.json`, `npm-shrinkwrap.json`, `node_modules`, `.npmrc`,
-  `.nvmrc`, `.node-version`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock` and `bun.lockb` exist.
-  Existence is asked of node because `daukle.read` raises on a missing file and the sandbox has no
-  `pcall`. The install's output is captured, so `daukle migrate` is silent while it runs. It runs
+  a script runs. The install's output is captured, so `daukle migrate` is silent while it runs. It runs
   with `check = false`, and `lib/npm_errors.lua` reads npm's `npm error code` line: a resolution
   code (`ETARGET`, `E404`, `ERESOLVE`, `EUNSUPPORTEDPROTOCOL`, `EINVALIDTAGNAME`, `E401`, `E403`)
   is one blocker carrying npm's lines and its log path, beside the file blockers, with only the
