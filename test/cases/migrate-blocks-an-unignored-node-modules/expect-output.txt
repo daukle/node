@@ -1,1 +1,2 @@
-add the line node_modules
+remove that negation
+!node_modules/

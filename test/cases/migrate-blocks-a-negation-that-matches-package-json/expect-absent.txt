@@ -1,0 +1,2 @@
+does not ignore node_modules
+add the line /package.json

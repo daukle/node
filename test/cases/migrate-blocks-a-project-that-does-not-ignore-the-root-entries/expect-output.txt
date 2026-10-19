@@ -1,3 +1,5 @@
 add the line node_modules
 add the line /package.json
 2. Module resolution: a tool that resolves `node_modules` or reads `package.json` itself
+as a link to build/daukle/node/node_modules
+as a copy of build/daukle/node/package.json
