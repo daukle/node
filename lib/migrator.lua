@@ -72,7 +72,7 @@ function mayUnignore(pattern, entry, prefixFromIgnoreFile) {
   return new RegExp("^" + globSource(glob) + "$", "i").test(path);
 }
 function readIgnoreLines(path) {
-  try { return readFileSync(path, "utf8").split("\n"); }
+  try { return readFileSync(path, "utf8").replace(/^\uFEFF/, "").split("\n"); }
   catch (error) { if (error.code === "ENOENT") return []; throw error; }
 }
 /** @implNote git keeps leading whitespace and every trailing character but an unescaped space, a tab included. */
