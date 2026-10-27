@@ -1,5 +1,5 @@
 import Module, { createRequire, isBuiltin, registerHooks } from "node:module";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { dirname, join, resolve as resolvePath } from "node:path";
 
@@ -8,12 +8,28 @@ const anchor = join(here, "__daukle_anchor__.js");
 const asIfImportedFrom = pathToFileURL(anchor).href;
 const requireFromDerived = createRequire(anchor);
 const installedUnder = pathToFileURL(join(here, "node_modules")).href + "/";
-const projectUnder = pathToFileURL(resolvePath(here, "..", "..", "..")).href + "/";
+const projectRoot = resolvePath(here, "..", "..", "..");
+const projectUnder = pathToFileURL(projectRoot).href + "/";
 const projectFormat = null;
+
+// Node takes a file's type from its NEAREST package.json, and one with no
+// "type" means CommonJS, so a package.json below the root decides for the
+// files under it; at the root, daukle.toml's type plays that file's part.
+const nestedManifestByDirectory = new Map();
+function hasNestedManifest(directory) {
+  if (directory === projectRoot || !directory.startsWith(projectRoot)) return false;
+  let found = nestedManifestByDirectory.get(directory);
+  if (found === undefined) {
+    found = existsSync(join(directory, "package.json")) || hasNestedManifest(dirname(directory));
+    nestedManifestByDirectory.set(directory, found);
+  }
+  return found;
+}
 
 function isProjectJavaScript(url) {
   return projectFormat !== null && url.startsWith(projectUnder) && !url.startsWith(installedUnder)
-    && !url.includes("/node_modules/") && url.endsWith(".js");
+    && !url.includes("/node_modules/") && url.endsWith(".js")
+    && !hasNestedManifest(dirname(fileURLToPath(url)));
 }
 
 const loadJavaScriptNatively = Module._extensions[".js"];

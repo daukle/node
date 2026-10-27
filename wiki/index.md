@@ -26,7 +26,7 @@ package, sorted, to `build/daukle/node/dependency-tree.txt` and to the terminal.
 | `entry` | the module `node:run` runs. Optional; `node:run` needs it when no script is declared |
 | `scripts` | a script per task, below |
 | `packages`, `devPackages` | package name to version range |
-| `type` | `"module"` or `"commonjs"`: the module system of your own `.js` files, as `type` in a `package.json`. Unset forces nothing. It overrides a nested `package.json`'s own `type` below the package root, which npm would honour: a deliberate difference, and `daukle migrate` blocks such a file rather than override it, searching every directory but `node_modules`, `.git` and `build/daukle` |
+| `type` | `"module"` or `"commonjs"`: the module system of your own `.js` files, as `type` in a `package.json`. Unset forces nothing. A nested `package.json` below the package root decides for the files under it, as in node, where one with no `type` means CommonJS. `daukle migrate` still blocks such a file, because its resolution fields are not carried, searching every directory but `node_modules`, `.git` and `build/daukle` |
 
 A module of yours, run by `node:run` or a script, has the package root as its working directory: the
 directory of the instance (`dir`), or the project root. A relative path in a module means what it

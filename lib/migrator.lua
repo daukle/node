@@ -172,9 +172,9 @@ local NPM_CONFIGURATION = "configures npm in a way this toolchain does not carry
 local VERSION_MANAGER = "names a node version for a version manager, which this toolchain never"
                         .. " reads beside the version it writes"
 
-local NESTED_PACKAGE = "is a package.json below the package root, which node reads for the format"
-                       .. " and resolution of the files under it, and which the toolchain's"
-                       .. " declared type would override"
+local NESTED_PACKAGE = "is a package.json below the package root, which node reads for the resolution"
+                       .. " of the files under it (its \"imports\" map, a self-reference by name),"
+                       .. " and the toolchain resolves a bare specifier from the derived directory instead"
 local NESTED_ROW = "2. Module resolution: a nested `package.json` below the package root"
 local UNRESOLVED_ROW = "3. Dependencies: the declared dependencies do not resolve"
 

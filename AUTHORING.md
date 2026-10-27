@@ -140,11 +140,14 @@ reaches the plugin.
 ## The project's own `type`
 
 The generated `package.json` carries the toolchain's `type`, and so does the copy placed at the
-package root. The resolver still enforces it, because a nested `package.json` is a format boundary
-for node and the key `type` (`"module"` or `"commonjs"`) overrides it; the resolver is generated with
-the value written into it. It applies to a `.js` file under the project and outside any `node_modules`, and
-overrides what a nested `package.json` says; `.mjs` and `.cjs` keep their fixed formats. With no
-`type` nothing is forced.
+package root. The resolver enforces it, generated with the value written into it, for a `.js` file
+under the project, outside any `node_modules`, **and with no `package.json` between it and the
+project root**. That last part is node's own rule: a file takes its format from its NEAREST
+`package.json`, and one with no `type` means CommonJS, so a nested `package.json` decides for the
+files under it exactly as it does under npm (`D-161`, decided 2026-10-27; until then the key
+overrode it). At the root, the key plays the root `package.json`'s part. `.mjs` and `.cjs` keep
+their fixed formats, and with no `type` nothing is forced. The `a-nested-*` and
+`the-root-type-and-a-nested-one-*` cases prove each half on 22.15.0 and 26.3.1.
 
 **The format travels two ways, and there is no `load` hook.** An `import` gets it from the resolve
 hook's result, which node honours as the format on 22.15.0, 24.21.0 and 26.3.1. A `require` runs
