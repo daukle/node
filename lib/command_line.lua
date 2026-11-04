@@ -9,10 +9,20 @@ local NPM_SCRIPT_VERBS = { test = "test", t = "test", start = "start", stop = "s
                            restart = "restart" }
 
 local SHELL = 'needs a shell, which this toolchain refuses by design: "%s"'
+local GLOB_CHARACTER = "[%*%?%[%]]"
 
---[[ @implNote a quoted word is unquoted only when what it quotes holds no
-     shell character, because npm hands the body to sh on one host and cmd.exe
-     on another, and the two disagree about what a quoted metacharacter does. ]]
+--- Whether a word holds a shell character other than a glob's `*`, `?`, `[` and `]`.
+local function has_other_shell_character(word)
+  return string.find((string.gsub(word, GLOB_CHARACTER, "")), SHELL_CHARACTER) ~= nil
+end
+
+--[[ An unquoted glob becomes { glob = word }, expanded at run time as sh does,
+     and a quoted one is the literal word sh passes (D-227).
+
+     @implNote a quoted word is unquoted only when what it quotes holds no
+     other shell character, because npm hands the body to sh on one host and
+     cmd.exe on another, and the two disagree about what a quoted metacharacter
+     does. ]]
 local function words_of(text)
   local words, index, length = {}, 1, #text
   while index <= length do
@@ -27,7 +37,7 @@ local function words_of(text)
         return nil, string.format(SHELL, string.sub(text, index, closing + 1))
       end
       local quoted = string.sub(text, index + 1, closing - 1)
-      if string.find(quoted, SHELL_CHARACTER) then return nil, string.format(SHELL, quoted) end
+      if has_other_shell_character(quoted) then return nil, string.format(SHELL, quoted) end
       words[#words + 1] = quoted
       index = closing + 1
     else
@@ -36,8 +46,8 @@ local function words_of(text)
       if string.find(string.sub(text, finish + 1, finish + 1), "[\"']") then
         return nil, string.format(SHELL, word .. string.sub(text, finish + 1, finish + 1))
       end
-      if string.find(word, SHELL_CHARACTER) then return nil, string.format(SHELL, word) end
-      words[#words + 1] = word
+      if has_other_shell_character(word) then return nil, string.format(SHELL, word) end
+      words[#words + 1] = string.find(word, GLOB_CHARACTER) and { glob = word } or word
       index = finish + 1
     end
   end
@@ -80,26 +90,77 @@ local function npm_step(words, declared)
   return { script = target }
 end
 
-local function step_of(words, declared)
+local ASSIGNMENT = "^([%a_][%w_]*)=(.*)$"
+
+--- The `NAME=value` words a segment starts with, as an env table or nil, and the words after them.
+local function env_prefix(words)
+  local env, index = nil, 1
+  while type(words[index]) == "string" and string.match(words[index], ASSIGNMENT) do
+    local name, value = string.match(words[index], ASSIGNMENT)
+    env = env or {}
+    env[name] = value
+    index = index + 1
+  end
+  return env, rest_of(words, index)
+end
+
+--- `rm` and its flags as a remove step, as `rm` reads them.
+local function remove_step(words)
+  local step = { remove = {} }
+  for index = 2, #words do
+    local word = words[index]
+    if type(word) == "string" and string.match(word, "^%-[rRf]+$") then
+      if string.find(word, "[rR]") then step.recursive = true end
+      if string.find(word, "f", 1, true) then step.force = true end
+    elseif type(word) == "string" and string.sub(word, 1, 1) == "-" then
+      return nil, string.format('passes "%s" to rm, which a remove step cannot carry', word)
+    else
+      step.remove[#step.remove + 1] = word
+    end
+  end
+  if #step.remove == 0 then return nil, 'runs "rm" with nothing to remove' end
+  return step
+end
+
+local function with_env(step, env)
+  if step ~= nil and env ~= nil then step.env = env end
+  return step
+end
+
+local function step_of(segment, declared)
+  local env, words = env_prefix(segment)
   local first = words[1]
-  if string.match(first, "^[%a_][%w_]*=") then
-    return nil, string.format('sets an environment variable with "%s", which needs a shell', first)
+  if first == nil then
+    return nil, 'only sets environment variables, which a shell keeps for later commands and a step cannot'
+  end
+  if type(first) ~= "string" then
+    return nil, string.format(SHELL, first.glob .. '", a glob naming the command')
+  end
+  if first == "rm" then
+    if env ~= nil then return nil, 'sets environment variables for "rm", which a remove step cannot carry' end
+    return remove_step(words)
   end
   if RUNNERS[first] then
     return nil, string.format('runs "%s", which fetches or runs code outside the provisioned node',
                               first)
   end
   if SHELL_WORDS[first] then return nil, string.format(SHELL, first) end
-  if first == "npm" then return npm_step(words, declared) end
+  if first == "npm" then
+    if env ~= nil then return nil, 'sets environment variables for "npm", which a script step cannot carry' end
+    return npm_step(words, declared)
+  end
   if first == "node" then
     if words[2] == nil then return nil, 'runs "node" with nothing to run' end
+    if type(words[2]) ~= "string" then
+      return nil, string.format(SHELL, words[2].glob .. '", a glob naming the module')
+    end
     if string.sub(words[2], 1, 1) == "-" then
       return nil, string.format('passes the flag "%s" to node, which a module step cannot carry',
                                 words[2])
     end
-    return { module = words[2], args = rest_of(words, 3) }
+    return with_env({ module = words[2], args = rest_of(words, 3) }, env)
   end
-  return { command = first, args = rest_of(words, 2) }
+  return with_env({ command = first, args = rest_of(words, 2) }, env)
 end
 
 return { parse = parse, step_of = step_of }

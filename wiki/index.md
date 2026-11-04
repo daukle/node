@@ -93,6 +93,13 @@ one of:
 | `{ module = "<path>" }` | a module of yours, with the provisioned node |
 | `{ bin = "<package>", args = [...] }` | the command an installed package publishes |
 | `{ script = "<name>" }` | another script declared here |
+| `{ remove = [...], recursive = true, force = true }` | deletes paths as `rm -rf` would; without `recursive` a directory is refused, without `force` a missing path is |
+
+A `module` or `bin` step also takes `env = { NAME = "value" }`, added to the environment it runs in.
+**An argument may be `{ glob = "<pattern>" }`**, expanded against the package root just before the
+step runs, as POSIX `sh` expands an unquoted glob: `*`, `?` and `[...]` within one directory (`**` is
+`*`), dotfiles only for a pattern starting with `.`, sorted, and the pattern itself when it matches
+nothing. That is the same on every host, including Windows, where `cmd.exe` would not expand it.
 
 **A `:` in a script name becomes a `.` in the task name**, because a task name holds one colon and
 that one names the toolchain. The npm script keeps its own spelling; only the task is mapped. Two
@@ -197,9 +204,11 @@ replace with a test of the fixture.
 A lockfile. The cost is named rather than hidden: without one, what a range resolves to can move
 between two runs on different days.
 
-**A shell.** A step names a program and its arguments, never a command line, so `&&`, a pipe, a
-glob and an inline `FOO=1` are all outside. Measured across this organization's own tree, that is
-7% of real npm scripts; for those, a manifest task's `run = { tool, args }` is the escape hatch.
+**A shell.** A step names a program and its arguments, never a command line. `daukle migrate`
+translates the common shell syntax into steps instead (`D-227`): `a && b`, `NAME=value cmd`, an
+unquoted glob argument and `rm`. Everything else a shell would do still blocks by name: a pipe, `||`,
+`;`, redirection, `$(...)`, `cd` and the other builtins. For those, a manifest task's
+`run = { tool, args }` is the escape hatch.
 
 **`npx`.** It fetches an unpinned package at run time, which is the one thing daukle exists to stop.
 
