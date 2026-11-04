@@ -27,6 +27,7 @@ package, sorted, to `build/daukle/node/dependency-tree.txt` and to the terminal.
 | `scripts` | a script per task, below |
 | `packages`, `devPackages` | package name to version range |
 | `type` | `"module"` or `"commonjs"`: the module system of your own `.js` files, as `type` in a `package.json`. Unset forces nothing. A nested `package.json` below the package root decides for the files under it, as in node, where one with no `type` means CommonJS. `daukle migrate` still blocks such a file, because its resolution fields are not carried, searching every directory but `node_modules`, `.git` and `build/daukle` |
+| `packageFields` | fields of a `package.json` this toolchain does not model, such as `browserslist`, `lint-staged` or `sideEffects`, each as its own JSON text: `browserslist = '["> 1%"]'`. Written verbatim into the generated `package.json`, which `node:install` places at the package root, so a tool that reads `package.json` itself finds them; npm ignores a field it does not know. A field this toolchain writes or models, or one it has no equivalent for, is refused, and so is text that is not exactly one JSON value. `daukle migrate` writes it for every field it does not know |
 
 A module of yours, run by `node:run` or a script, has the package root as its working directory: the
 directory of the instance (`dir`), or the project root. A relative path in a module means what it
