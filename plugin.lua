@@ -11,6 +11,7 @@ local settings = daukle.require("lib/settings")
 local paths = daukle.require("lib/paths")
 local tree = daukle.require("lib/tree")
 local links = daukle.require("lib/links")
+local glob = daukle.require("lib/glob")
 
 daukle.toolchain{
   name = "node",
@@ -21,6 +22,7 @@ daukle.toolchain{
       ["package.json"] = settings.package_json(spec),
       [runners.RESOLVER_NAME] = runners.resolver_for(spec.type),
       [runners.BIN_RUNNER_NAME] = runners.BIN_RUNNER,
+      [runners.REMOVER_NAME] = runners.REMOVER,
       [tree.SCRIPT_NAME] = tree.SCRIPT,
       [links.SCRIPT_NAME] = links.SCRIPT,
     }
@@ -82,13 +84,28 @@ end
 --[[ @implNote --import is resolved against the working directory, which is the
      package root here, so the resolver is named relative to it and starts with
      "./" or "../" to stay a relative URL rather than a bare specifier. ]]
-local function run_module(context, root, pick, module_path, args)
+local function run_module(context, root, pick, module_path, args, env)
   local derived = derived_from_package_root(context)
   local resolver = (string.sub(derived, 1, 3) == "../" and "" or "./") .. derived .. "/"
                    .. runners.RESOLVER_NAME
   local argv = { "--import", resolver, module_path }
   for index = 1, #args do argv[#argv + 1] = args[index] end
-  daukle.exec(root:tool(pick.node), argv, { cwd = package_root(context) })
+  daukle.exec(root:tool(pick.node), argv, { cwd = package_root(context), env = env })
+end
+
+--- A step's arguments with every `{ glob = ... }` expanded against the package root.
+local function expanded(context, args)
+  local root = package_root(context)
+  if root == "." then root = "" end
+  local out = {}
+  for _, argument in ipairs(args) do
+    if type(argument) == "table" then
+      for _, path in ipairs(glob.expand(root, argument.glob)) do out[#out + 1] = path end
+    else
+      out[#out + 1] = argument
+    end
+  end
+  return out
 end
 
 local function refuse_a_project_with_no_entry(spec)
@@ -126,12 +143,18 @@ local function run_steps(context, spec, script)
       end
     elseif step.kind == "module" then
       local root, pick = provision_node(context, spec)
-      run_module(context, root, pick, step.name, step.args)
+      run_module(context, root, pick, step.name, expanded(context, step.args), step.env)
+    elseif step.kind == "remove" then
+      local root, pick = provision_node(context, spec)
+      local argv = { step.recursive and "1" or "0", step.force and "1" or "0" }
+      for _, path in ipairs(expanded(context, step.paths)) do argv[#argv + 1] = path end
+      run_module(context, root, pick, derived_from_package_root(context) .. "/" .. runners.REMOVER_NAME, argv)
     else
       local root, pick = provision_node(context, spec)
       local argv = { step.name, step.binName or "" }
-      for at = 1, #step.args do argv[#argv + 1] = step.args[at] end
-      run_module(context, root, pick, derived_from_package_root(context) .. "/" .. runners.BIN_RUNNER_NAME, argv)
+      for _, argument in ipairs(expanded(context, step.args)) do argv[#argv + 1] = argument end
+      run_module(context, root, pick, derived_from_package_root(context) .. "/" .. runners.BIN_RUNNER_NAME, argv,
+                 step.env)
     end
   end
 end

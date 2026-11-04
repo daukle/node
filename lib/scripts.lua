@@ -4,7 +4,9 @@
 
 local LIFECYCLE_TASKS = { install = true, run = true, tree = true }
 
-local STEP_KINDS = { module = true, bin = true, script = true }
+local STEP_KINDS = { module = true, bin = true, script = true, remove = true }
+
+local ENV_NAME = "^[%a_][%w_]*$"
 
 --[[ @implNote npm spells a hierarchy with a colon and a daukle task name holds
      at most one, which is the toolchain prefix. A dot is legal and NOT ONE of
@@ -47,27 +49,62 @@ local function checked_args(args, where)
   end
   local out = {}
   for index = 1, #args do
-    if type(args[index]) ~= "string" then
-      error(string.format('%s has an argument that is a %s, and every argument is a string',
-                          where, type(args[index])), 0)
+    local argument = args[index]
+    local is_glob = type(argument) == "table" and type(argument.glob) == "string" and next(argument, next(argument)) == nil
+    if type(argument) ~= "string" and not is_glob then
+      error(string.format('%s has an argument that is a %s, and every argument is a string or'
+                          .. ' { glob = "<pattern>" }', where, type(argument)), 0)
     end
-    out[index] = args[index]
+    out[index] = argument
   end
   return out
 end
 
+local function checked_env(env, where)
+  if env == nil then return nil end
+  if type(env) ~= "table" then
+    error(string.format('%s has "env" that is a %s, and env is a table of name to value', where, type(env)), 0)
+  end
+  for name, value in pairs(env) do
+    if type(name) ~= "string" or not string.match(name, ENV_NAME) or type(value) ~= "string" then
+      error(string.format('%s has an env entry "%s" that is not a variable name and a string value',
+                          where, tostring(name)), 0)
+    end
+  end
+  return env
+end
+
+--- A `remove` step: what it deletes, as `rm` would, with its two flags.
+local function checked_remove(step, where)
+  local paths = checked_args(step.remove, where)
+  if #paths == 0 then error(string.format('%s removes nothing', where), 0) end
+  for key in pairs(step) do
+    if key ~= "remove" and key ~= "recursive" and key ~= "force" then
+      error(string.format('"%s" is not a key a remove step knows, in %s: it takes "recursive"'
+                          .. ' and "force"', key, where), 0)
+    end
+  end
+  for _, flag in ipairs({ "recursive", "force" }) do
+    if step[flag] ~= nil and type(step[flag]) ~= "boolean" then
+      error(string.format('%s has a "%s" that is not true or false', where, flag), 0)
+    end
+  end
+  return { kind = "remove", paths = paths, recursive = step.recursive == true, force = step.force == true }
+end
+
 --[[ A step is a ONE-KEY table rather than a command string, so that nothing
      here has to guess where a word ends. A string would also be the place a
-     shell crept in: 7% of this tree's npm scripts need true shell features and
-     they are refused by name instead, because daukle's answer to them is
-     already decided. ]]
+     shell crept in. A shell stays refused; the migrator turns the common
+     subset of shell syntax into steps instead (D-227), and refuses the rest by
+     name. ]]
 local function checked_step(step, where)
   if type(step) ~= "table" then
-    error(string.format('%s is a %s, and a step is a table naming one of "module", "bin" or'
-                        .. ' "script". A command line is deliberately not a step: for a program'
+    error(string.format('%s is a %s, and a step is a table naming one of "module", "bin",'
+                        .. ' "script" or "remove". A command line is deliberately not a step: for a program'
                         .. ' daukle does not provision, use a manifest task\'s'
                         .. ' run = { tool, args }', where, type(step)), 0)
   end
+  if step.remove ~= nil then return checked_remove(step, where) end
   local kind
   for key in pairs(step) do
     if STEP_KINDS[key] then
@@ -76,27 +113,27 @@ local function checked_step(step, where)
                             where, kind, key), 0)
       end
       kind = key
-    elseif key ~= "args" and key ~= "binName" then
+    elseif key ~= "args" and key ~= "binName" and key ~= "env" then
       error(string.format('"%s" is not a key a step knows, in %s: a step names one of "module",'
-                          .. ' "bin" or "script". There is no shell and no "npx": for anything'
+                          .. ' "bin", "script" or "remove". There is no shell and no "npx": for anything'
                           .. ' else, use a manifest task\'s run = { tool, args }', key, where), 0)
     end
   end
   if kind == nil then
-    error(string.format('%s names none of "module", "bin" or "script", so it does nothing',
+    error(string.format('%s names none of "module", "bin", "script" or "remove", so it does nothing',
                         where), 0)
   end
   if type(step[kind]) ~= "string" or step[kind] == "" then
     error(string.format('%s has a "%s" that is not a name', where, kind), 0)
   end
-  if kind == "script" and (step.args ~= nil or step.binName ~= nil) then
+  if kind == "script" and (step.args ~= nil or step.binName ~= nil or step.env ~= nil) then
     error(string.format('%s runs another script, which takes no arguments of its own', where), 0)
   end
   if kind ~= "bin" and step.binName ~= nil then
     error(string.format('%s has a "binName" without a "bin"', where), 0)
   end
   return { kind = kind, name = step[kind], args = checked_args(step.args, where),
-           binName = step.binName }
+           binName = step.binName, env = checked_env(step.env, where) }
 end
 
 local function steps_of(value, where)

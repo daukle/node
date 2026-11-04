@@ -1,1 +1,1 @@
-{"scripts":{"clean":"rm -rf dist"}}
+{"scripts":{"clean":"rm -rf dist | tee log"}}

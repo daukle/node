@@ -1,0 +1,9 @@
+{
+  "private": true,
+  "scripts": {
+    "prep": "node src/make.mjs",
+    "show": "MODE=glob node src/print.mjs out/*.txt 'out/*.txt'",
+    "clean": "rm -rf out",
+    "all": "npm run prep && npm run show && npm run clean && node src/check.mjs"
+  }
+}
