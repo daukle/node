@@ -1,5 +1,6 @@
 local RESOLVER_NAME = "__daukle_resolver__.mjs"
 local BIN_RUNNER_NAME = "__daukle_bin__.mjs"
+local REMOVER_NAME = "__daukle_remove__.mjs"
 
 --[[ @implNote three of these four guards return a working module when they are
      wrong, which is why the suite compares every specifier against what node
@@ -186,7 +187,19 @@ process.argv = [process.argv[0], resolved, ...rest];
 await import(pathToFileURL(resolved).href);
 ]==]
 
+--[[ A `remove` step, which is what `rm` was in the script: no shell runs it, so
+     the provisioned node does. `rm` without -r refuses a directory and without
+     -f refuses a missing path, and rmSync does both the same way. ]]
+local REMOVER = [==[
+import { rmSync } from "node:fs";
+
+const [recursive, force, ...paths] = process.argv.slice(2);
+for (const path of paths) rmSync(path, { recursive: recursive === "1", force: force === "1" });
+]==]
+
 return {
+  REMOVER_NAME = REMOVER_NAME,
+  REMOVER = REMOVER,
   RESOLVER_NAME = RESOLVER_NAME,
   BIN_RUNNER_NAME = BIN_RUNNER_NAME,
   RESOLVER = RESOLVER,

@@ -75,7 +75,7 @@ return {
   blocked('{"scripts":{"pretest":"node a.js","test":"node b.js"}}', "pretest"),
   blocked('{"scripts":{"prepublishOnly":"node a.js"}}', "prepublishOnly"),
   blocked('{"scripts":{"postinstall":"node a.js"}}', "postinstall"),
-  blocked('{"scripts":{"clean":"rm -rf dist"}}', "NPM-SURFACE.md"),
+  blocked('{"scripts":{"clean":"cd dist && tsc"}}', "NPM-SURFACE.md"),
   blocked('{"scripts":{"Build":"node a.js","build":"node b.js"}}', "same daukle task"),
   blocked('{"scripts":{"run":"node a.js"}}', "lifecycle verb"),
   blocked('{"dependencies":{"a":"https://x.test/a.tgz?x=1"}}', "tarball"),
