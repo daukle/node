@@ -1,9 +1,14 @@
 local runtimes = daukle.require("lib/runtimes")
 local scripts = daukle.require("lib/scripts")
 local links = daukle.require("lib/links")
+local package_fields = daukle.require("lib/package_fields")
 
 local KNOWN_KEYS = { version = true, entry = true, packages = true, devPackages = true,
-                     scripts = true, type = true }
+                     scripts = true, type = true, [package_fields.KEY] = true }
+
+--- The fields the generated package.json writes itself, which `packageFields` cannot name.
+local WRITTEN = { [links.MARKER_KEY] = true, type = true, private = true, dependencies = true,
+                  devDependencies = true }
 
 local function config_of(context)
   if context.toolchain ~= nil then return context.toolchain.config end
@@ -132,6 +137,13 @@ end
 --[[ No "name": the project did not choose one and a generated name would show
      up in npm's output as if it had. "private" is what stops npm asking for the
      name and the version a publishable package needs. ]]
+--- The carried fields, each written as `"name": <its JSON text>` after a separator.
+local function carried_fields(names, values)
+  local text = ""
+  for _, name in ipairs(names or {}) do text = text .. ',\n  "' .. name .. '": ' .. values[name] end
+  return text
+end
+
 local function package_json(spec)
   local type_line = spec.type == nil and "" or ('  "type": "' .. spec.type .. '",\n')
   return '{\n'
@@ -139,7 +151,8 @@ local function package_json(spec)
     .. type_line
     .. '  "private": true,\n'
     .. '  "dependencies": ' .. json_object(spec.packages, spec.package_ranges, "  ") .. ',\n'
-    .. '  "devDependencies": ' .. json_object(spec.dev_packages, spec.dev_ranges, "  ") .. '\n'
+    .. '  "devDependencies": ' .. json_object(spec.dev_packages, spec.dev_ranges, "  ")
+    .. carried_fields(spec.field_names, spec.fields) .. '\n'
     .. '}\n'
 end
 
@@ -149,7 +162,10 @@ local function read(context)
   local packages, package_ranges = checked_packages(config, "packages")
   local dev_packages, dev_ranges = checked_packages(config, "devPackages")
   local declared_scripts = scripts.read(config)
+  local field_names, fields = package_fields.checked(config, WRITTEN)
   return {
+    field_names = field_names,
+    fields = fields,
     version = version_of(context),
     entry = entry_of(config),
     type = type_of(config),

@@ -2,11 +2,12 @@ local engines = daukle.require("lib/engines")
 local command_line = daukle.require("lib/command_line")
 local scripts = daukle.require("lib/scripts")
 local settings = daukle.require("lib/settings")
+local package_fields = daukle.require("lib/package_fields")
 
 local SURFACE = {
   dependencies = "3. Dependencies",
   scripts = "5. Scripts",
-  shell = "The boundary: what \"100% of npm and Node\" does not include",
+  shell = package_fields.ROWS.shell,
   prepost = "5. Scripts: `pre<name>` and `post<name>` run automatically",
   lifecycle = "5. Scripts: the project's own lifecycle scripts on install: `preinstall`, `prepare`",
   publishing = "7. Packing and publishing",
@@ -14,10 +15,10 @@ local SURFACE = {
   engines_field = "1. The runtime: `engines.node` / `engines.npm` in the package",
   module = "1. The runtime: `node <module>`",
   type = "2. Module resolution: the project's own `\"type\"`",
-  main = "2. Module resolution: the project's own `exports` and `main`, as offered to consumers",
+  main = package_fields.ROWS.main,
   tarball = "3. Dependencies: a tarball URL holding `?`, `%` or `&`",
   local_path = "3. Dependencies: local paths, `file:`",
-  workspaces = "6. Workspaces: `workspaces`, each linked into the root `node_modules`",
+  workspaces = package_fields.ROWS.workspaces,
 }
 
 local WORKSPACE_PROTOCOLS = {
@@ -32,31 +33,9 @@ local function workspace_protocol_of(range)
   return nil
 end
 
-local ABSENT_FIELDS = {
-  peerDependencies = "3. Dependencies: `peerDependencies`",
-  peerDependenciesMeta = "3. Dependencies: `peerDependenciesMeta`",
-  optionalDependencies = "3. Dependencies: `optionalDependencies`",
-  bundleDependencies = "3. Dependencies: `bundleDependencies`",
-  bundledDependencies = "3. Dependencies: `bundleDependencies`",
-  overrides = "3. Dependencies: `overrides`",
-  workspaces = SURFACE.workspaces,
-  bin = "7. Packing and publishing: the project's own `bin`",
-  exports = SURFACE.main,
-  imports = "2. Module resolution: the project's own `\"imports\"`, `#`-specifiers",
-  files = "7. Packing and publishing: `files`, `.npmignore`",
-  publishConfig = "7. Packing and publishing: `publishConfig`",
-  config = "5. Scripts: the `config` field",
-  os = "3. Dependencies", cpu = "3. Dependencies",
-  devEngines = "1. The runtime: `devEngines`",
-  packageManager = SURFACE.shell,
-}
-
-local METADATA = { name = true, version = true, description = true, license = true, author = true,
-                   contributors = true, keywords = true, repository = true, homepage = true,
-                   bugs = true, private = true, funding = true }
-
-local READ = { dependencies = true, devDependencies = true, engines = true, type = true,
-               main = true, scripts = true }
+local ABSENT_FIELDS = package_fields.ABSENT
+local METADATA = package_fields.METADATA
+local READ = package_fields.READ
 
 local LIFECYCLE = {}
 for _, name in ipairs({ "preinstall", "install", "postinstall", "prepare", "preprepare",
@@ -242,6 +221,35 @@ local function steps_in(step_or_steps)
   return { step_or_steps }
 end
 
+--- Every top-level member's name, sorted.
+---
+--- @implNote the raw names as well as the parsed ones, because a member whose
+--- value is JSON `null` has no key in the parsed table and would be dropped.
+local function member_names(parsed, raw)
+  local seen, names = {}, {}
+  for _, source in ipairs({ parsed, raw }) do
+    for name in pairs(source) do
+      if not seen[name] then
+        seen[name] = true
+        names[#names + 1] = name
+      end
+    end
+  end
+  table.sort(names)
+  return names
+end
+
+--- An unknown field into `packageFields` verbatim, or a blocker when its text cannot be told.
+local function carry_field(config, key, raw, where, blockers)
+  if raw == nil then
+    blocker(blockers, '"' .. key .. '"', where, "is a field this migrator does not know, named with an"
+            .. " escape it cannot carry verbatim, and a field it does not know is never dropped", nil)
+    return
+  end
+  config[package_fields.KEY] = config[package_fields.KEY] or {}
+  config[package_fields.KEY][key] = raw
+end
+
 local function package(text, where)
   local blockers = {}
   if type(text) == "string" and string.sub(text, 1, 3) == BOM then text = string.sub(text, 4) end
@@ -252,13 +260,13 @@ local function package(text, where)
   end
   local parsed = daukle.json_parse(text)
   local config = {}
-  for _, key in ipairs(sorted_keys(parsed)) do
+  local raw = package_fields.raw_members(text)
+  for _, key in ipairs(member_names(parsed, raw)) do
     if ABSENT_FIELDS[key] ~= nil then
       blocker(blockers, '"' .. key .. '"', where, "has no equivalent in this toolchain",
               ABSENT_FIELDS[key])
     elseif not READ[key] and not METADATA[key] then
-      blocker(blockers, '"' .. key .. '"', where, "is a field this migrator does not know, and a"
-              .. " field it does not know is never dropped", nil)
+      carry_field(config, key, raw[key], where, blockers)
     end
   end
   local range = node_range(parsed, where, blockers)
