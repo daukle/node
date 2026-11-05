@@ -277,13 +277,26 @@ local function file_blockers(context, facts, blockers)
   return blockers
 end
 
---- The closure the migrated project pins: the project's own lockfile when it holds npm 7's
---- `packages` map, so it installs exactly what it did, and otherwise the one the probe's
---- install wrote.
+--- Whether every package of a lockfile names its tarball and digest, which pinning needs:
+--- npm leaves `resolved` and `integrity` out of some entries of some lockfiles.
+local function is_complete_lock(lock)
+  if (lock.lockfileVersion or 1) < 2 or type(lock.packages) ~= "table" then return false end
+  for path, entry in pairs(lock.packages) do
+    if path ~= "" and not entry.inBundle and not entry.link
+       and (type(entry.resolved) ~= "string" or type(entry.integrity) ~= "string") then
+      return false
+    end
+  end
+  return true
+end
+
+--- The closure the migrated project pins: the project's own lockfile when it is complete, so
+--- it installs exactly what it did, and otherwise the one the probe's install wrote, which the
+--- proof then compares against the old build.
 local function lock_of(context, files)
   if files.exists["package-lock.json"] then
     local text = daukle.read(within(context.dir, "package-lock.json"))
-    if (daukle.json_parse(text).lockfileVersion or 1) >= 2 then return text end
+    if is_complete_lock(daukle.json_parse(text)) then return text end
   end
   return daukle.read(derived(context, "migrate-probe/package-lock.json"))
 end
