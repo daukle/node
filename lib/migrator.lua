@@ -15,7 +15,6 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-const ignored = { node_modules: false, package_json: false };
 /** @implNote no accepted form ends in a slash: git classifies a POSIX symlink as a file, so a directory-only pattern does not ignore the link node:install places (Git for Windows treats a junction as a directory, which hides this there). */
 const ROOT_ENTRIES = [
   { fact: "node_modules", name: "node_modules",
@@ -58,10 +57,8 @@ function applyIgnore(path, prefixFromIgnoreFile) {
     const pattern = negated ? line.slice(1) : line;
     for (const entry of ROOT_ENTRIES) {
       if (negated && mayUnignore(pattern, entry, prefixFromIgnoreFile)) {
-        ignored[entry.fact] = false;
         reincludedBy[entry.fact] = { line, file: path };
       } else if (!negated && entry.forms(prefixFromIgnoreFile).includes(pattern)) {
-        ignored[entry.fact] = true;
         delete reincludedBy[entry.fact];
       }
     }
@@ -74,11 +71,8 @@ try {
     const prefixFromIgnoreFile = level === 0 ? "" : segments.slice(segments.length - level).join("/") + "/";
     applyIgnore("../".repeat(level) + ".gitignore", prefixFromIgnoreFile);
   }
-} catch {
-  ignored.node_modules = false;
-  ignored.package_json = false;
-  delete reincludedBy.node_modules;
-  delete reincludedBy.package_json;
+} catch (error) {
+  for (const entry of ROOT_ENTRIES) reincludedBy[entry.fact] = { unreadable: String(error.message ?? error) };
 }
 const own = JSON.parse(readFileSync(join(here, "package.json"), "utf8"));
 const bins = {};
@@ -92,7 +86,7 @@ for (const name of Object.keys({ ...own.dependencies, ...own.devDependencies }))
     : Object.keys(map ? manifest.bin : {});
   for (const command of commands) (bins[command] ??= []).push({ name, map });
 }
-process.stdout.write(JSON.stringify({ bins, ignored, reincludedBy }));
+process.stdout.write(JSON.stringify({ bins, reincludedBy }));
 ]==]
 
 local function within(dir, name)
@@ -205,8 +199,12 @@ local ROOT_ENTRIES = {
   { fact = "package_json", line = "/package.json", name = "package.json", placed = "as a copy of" },
 }
 
+--- Why a `.gitignore` can still list a placed entry, which node:install's `info/exclude` line
+--- cannot overrule, since git ranks every `.gitignore` above it.
 local function root_entry_remedy(entry, reincluded)
-  if reincluded == nil then return "add the line " .. entry.line end
+  if reincluded.unreadable ~= nil then
+    return "a .gitignore that cannot be read could re-include it (" .. reincluded.unreadable .. ")"
+  end
   return "the negation " .. reincluded.line .. " in " .. reincluded.file .. " can re-include it:"
          .. " remove that negation, or repeat " .. entry.line .. " below it"
 end
@@ -320,9 +318,9 @@ local function run(context)
   end
   file_blockers(context, files, blockers)
   for _, entry in ipairs(ROOT_ENTRIES) do
-    if not facts.ignored[entry.fact] then
+    if facts.reincludedBy[entry.fact] ~= nil then
       blockers[#blockers + 1] = { construct = ".gitignore", where = within(context.dir, ".gitignore"),
-                                  why = "does not ignore " .. entry.line .. ", which node:install places at"
+                                  why = "may not ignore " .. entry.line .. ", which node:install places at"
                                         .. " the package root " .. entry.placed .. " "
                                         .. derived(context, entry.name) .. ": "
                                         .. root_entry_remedy(entry, facts.reincludedBy[entry.fact]),

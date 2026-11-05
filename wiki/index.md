@@ -72,12 +72,11 @@ Where a link is refused (`EPERM`, `ENOTSUP`, `EOPNOTSUPP` or `EINVAL`), or `DAUK
 it. The bytes placed as `package.json` are kept in `build/daukle/<instance>/__daukle_placed__.json`,
 which is how an old copy is told from an edited one.
 
-**Add both to the project's `.gitignore`**: `node_modules` and `/package.json`. Write `node_modules`
-with no trailing slash: git classifies a symlink as a file, so `node_modules/`, which matches only
-directories, does not ignore the link on Linux or macOS. They are generated,
-and `daukle migrate` blocks a project whose `.gitignore` files, read from the project root down to
-the package root, do not ignore both, naming the line to add. `.git/info/exclude` and a global
-excludes file are not read.
+**Nothing to add to `.gitignore`.** Inside a git repository, `node:install` writes both entries
+to that clone's `.git/info/exclude` (the shared one, for a worktree), as `/<path>/node_modules` and
+`/<path>/package.json` from the repository root. That file is never committed, so no project file
+changes; outside a git repository nothing is written. A `.gitignore` ranks above it, so `daukle
+migrate` blocks only a `.gitignore` negation that could re-include either entry, naming it.
 
 **`node:install` refuses, and changes nothing, when:**
 
@@ -169,8 +168,8 @@ toolchain cannot.
 - Dependencies npm cannot install as declared, with no lockfile and no project `.npmrc`: a version
   that does not exist, or a peer conflict. The blocker carries npm's own error. An install that
   fails for the host's reasons, such as an unreachable registry, is an error, not a blocker.
-- A project whose `.gitignore` files do not ignore `node_modules` and `/package.json`, which
-  `node:install` places at the package root. The report names the line to add.
+- A `.gitignore` negation that could re-include the `node_modules` or `package.json` that
+  `node:install` places at the package root. The report names the negation.
 - A `package.json` below the package root, in any directory but `node_modules`, `.git` and the
   derived `build/daukle`, and a directory that search cannot list.
 - Lifecycle scripts, and a `pre<x>` or `post<x>` beside an `<x>`.
