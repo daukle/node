@@ -10,14 +10,12 @@ It also exports `lib/runtimes`, the table of which Node archive a host needs and
 `daukle.require("node:lib/runtimes")` rather than copying it, which is the layering `daukle/c` and
 `daukle/cmake` established.
 
-## Why this is not `daukle/npm`
+## How this relates to `daukle/npm`
 
-`daukle/npm` is a `daukle.language` plugin: it edits a `package.json` you own and maintain, which
-is adopted mode. This repository is managed mode. **They are two plugins because, until
-`daukle 0.8.0`, core refused a language in any chunk that declared `provision` or `exec`**, the
-collision `daukle/c` paid for first. `0.8.0` lifted that (`D-133`, plugin api 2): a language's
-`apply` is refused `exec` at run time instead, so the two could now share a chunk. Nobody has asked
-for that, and `daukle/npm`'s published `1.0.0` is what keeps them apart.
+`daukle/npm` is being redesigned as the resolver beside this toolchain, as `daukle/maven` is beside
+`daukle/java`: it will pin every package of the closure by its registry integrity digest, so
+`node:install` resolves no range. Its earlier releases edited a `package.json` you maintained, a
+mode removed from daukle in `0.19.0`.
 
 ## How resolution works
 
