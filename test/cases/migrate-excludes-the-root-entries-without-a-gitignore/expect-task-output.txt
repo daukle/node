@@ -1,0 +1,3 @@
+git lists no placed entry
+/web/node_modules
+/web/package.json

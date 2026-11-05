@@ -190,19 +190,24 @@ variable `DAUKLE_NODE_LINK=copy` forces that, and is the only way to make a link
 
 **It refuses, never replaces, what it did not place.** A real root `node_modules` or `package.json`,
 a `node_modules` link pointing elsewhere, dangling or not (naming that two node toolchains cannot share one package
-root, when it points into another instance), and an edited root `package.json`. The migrator
-(`ROOT_ENTRIES`, `lib/migrator.lua`) blocks a project whose `.gitignore` files, read from the project
-root down to the package root, do not ignore `node_modules` and `/package.json`. It accepts only
-`node_modules`, `**/node_modules`, `/node_modules` and `/<dir>/node_modules` from an ancestor, never
-a form ending in a slash: git classifies a POSIX symlink as a file, so a directory-only pattern does
-not ignore it (measured in WSL; Git for Windows treats a junction as a directory, so the Windows
-runners cannot see this). `git-ignores-the-placed-root-entries` asks git itself. A negated line counts
+root, when it points into another instance), and an edited root `package.json`. **It keeps both out of git with no project file edited**
+(`excludeFromRepository`, `lib/links.lua`, `D-234`): the nearest `.git` above the package root names
+the repository, a `.git` FILE is followed through `gitdir:` and `commondir` to the shared directory,
+and the missing `/<path>` lines are appended to its `info/exclude`. No pattern ends in a slash: git
+classifies a POSIX symlink as a file, so a directory-only pattern does not exclude it (measured in WSL
+2026-11-05, git 2.53; a Windows junction is excluded either way). The case harness runs `git init` in
+every sandbox, or the script would write this repository's own exclude.
+`migrate-excludes-the-root-entries-without-a-gitignore` asks git itself.
+
+**A `.gitignore` ranks above `info/exclude`**, so the migrator (`ROOT_ENTRIES`, `lib/migrator.lua`)
+still reads the `.gitignore` files from the project root down to the package root and blocks a
+negation that could re-include an entry. A later `node_modules`, `**/node_modules`, `/node_modules`
+or `/<dir>/node_modules` line clears it, never a form ending in a slash. A negated line counts
 as un-ignoring an entry when its glob could match it (`*`, `?` and `**`, case ignored, a trailing
 slash ignored), and always when it holds an escape or a bracket class, so `!*.md` passes and
-`!*.json` blocks `package.json`; the blocker then names that negation rather than asking for a line
-that is already there. Leading whitespace and every trailing character but an unescaped space stay
+`!*.json` blocks `package.json`, and the blocker names that negation. Leading whitespace and every trailing character but an unescaped space stay
 part of the pattern, as git keeps them, and a leading byte-order mark is dropped, as git drops it.
-Every doubtful reading fails closed. Ignore rules do not apply to a tracked file, and a migrated
+Every doubtful reading fails closed, and an ignore file that cannot be read blocks. Ignore rules do not apply to a tracked file, and a migrated
 project's old `package.json` almost always is one, so the wiki tells the user to run
 `git rm --cached package.json` (and `git rm -r --cached node_modules` if it was tracked) and commit;
 a plugin cannot run git, and core prints no plugin text after a migration.
