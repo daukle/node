@@ -78,8 +78,8 @@ local BELOW_FLOOR =
   .. ' a bare specifier for both module systems: this toolchain resolves dependencies'
   .. ' through that hook and has nothing to fall back on.'
   .. ' This key is which node DAUKLE RUNS, which is not what your package supports:'
-  .. ' the generated package.json carries no "engines", so write ">=%s" here and keep'
-  .. ' your own range in your own manifest'
+  .. ' write ">=%s" here and keep your own range in packageFields.engines, which the'
+  .. ' generated package.json carries'
 
 --[[ @implNote the lower bound is refused rather than the resolved version,
      because a constraint is a statement about what the project tolerates. A
@@ -151,4 +151,11 @@ local function pinned()
   return out
 end
 
-return { for_host = for_host, floor = text_of(FLOOR), pinned = pinned }
+--- Every pinned release as `{ version, npm }`, newest first, copied so a caller cannot edit the pins.
+local function releases()
+  local out = {}
+  for index = 1, #RELEASES do out[index] = { version = RELEASES[index].version, npm = RELEASES[index].npm } end
+  return out
+end
+
+return { for_host = for_host, floor = text_of(FLOOR), pinned = pinned, releases = releases }

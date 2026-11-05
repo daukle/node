@@ -199,21 +199,16 @@ local function entry_of(package, has_scripts, where, blockers)
   return entry
 end
 
-local function node_range(package, where, blockers)
+--- The `engines.node` and `engines.npm` ranges; `engines` itself is carried verbatim.
+local function engine_ranges(package, where, blockers)
   local map = package.engines
-  if map == nil then return nil end
+  if map == nil then return nil, nil end
   if type(map) ~= "table" or #map > 0 then
     blocker(blockers, '"engines"', where, "is not a map of engine name to range",
             SURFACE.engines_field)
-    return nil
+    return nil, nil
   end
-  for _, name in ipairs(sorted_keys(map)) do
-    if name ~= "node" then
-      blocker(blockers, "engines." .. name, where, "is a requirement the generated package.json"
-              .. " does not carry", SURFACE.engines_field)
-    end
-  end
-  return map.node
+  return map.node, map.npm
 end
 
 local function steps_in(step_or_steps)
@@ -269,9 +264,8 @@ local function package(text, where)
       carry_field(config, key, raw[key], where, blockers)
     end
   end
-  local range = node_range(parsed, where, blockers)
-  local version, why = engines.newest_satisfying(range)
-  if version == nil then blocker(blockers, "engines.node", where, why, SURFACE.engines) end
+  local version, why, engine = engines.newest_satisfying(engine_ranges(parsed, where, blockers))
+  if version == nil then blocker(blockers, "engines." .. engine, where, why, SURFACE.engines) end
   config.version = version
   config.packages = dependency_map(parsed, "dependencies", where, blockers)
   config.devPackages = dependency_map(parsed, "devDependencies", where, blockers)

@@ -33,7 +33,10 @@ package_fields.ABSENT = {
 }
 
 --- Fields the migrator reads into keys of their own.
-package_fields.READ = { dependencies = true, devDependencies = true, engines = true, type = true,
+---
+--- @implNote `engines` is absent on purpose: it is read for `version` AND carried,
+--- because what a package supports is not which node daukle runs (`AUTHORING.md`).
+package_fields.READ = { dependencies = true, devDependencies = true, type = true,
                         main = true, scripts = true }
 
 --- Fields describing the package, which the generated file deliberately leaves out.
