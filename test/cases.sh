@@ -5,6 +5,10 @@
 # ubuntu, macOS and windows runner carries.
 set -eu
 
+# Unset before any case runs, so a build reading its environment never sees it.
+only_case=${DAUKLE_CASE:-}
+unset DAUKLE_CASE
+
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 work="$root/test/.work"
 
@@ -75,6 +79,11 @@ server.serve_forever()
 # The catalog's asset is pinned by url and sha256, and core takes only https or
 # loopback http for it, so the staged plugin is packed exactly as publish.yml
 # packs it and served from 127.0.0.1.
+# daukle/npm translates a migrated project's dependencies into pins, so the
+# catalog names its release beside the staged node plugin.
+NPM_PLUGIN_URL=https://github.com/daukle/npm/releases/download/2.1.0/plugin.lua
+NPM_PLUGIN_SHA256=12d18faf6b72cffc6da76afe678d231ee7820229f63fd466206021dd89a2d5f6
+
 serve_plugin() {
   [ -n "${catalog:-}" ] && return 0
   if [ -n "${server_broken:-}" ]; then
@@ -110,8 +119,8 @@ serve_plugin() {
   fi
   server_broken=
   catalog="$work/catalog.json"
-  "$python" -c 'import json,sys; c=json.load(open(sys.argv[1])); c.update(id="node", asset={"url":sys.argv[2],"sha256":sys.argv[3]}); json.dump({"plugins":[c]}, open(sys.argv[4],"w"))' \
-    "$root/catalog.json" "http://127.0.0.1:$port/plugin.lua" "$digest" "$catalog"
+  "$python" -c 'import json,sys; c=json.load(open(sys.argv[1])); c.update(id="node", asset={"url":sys.argv[2],"sha256":sys.argv[3]}); n={"id":"npm","asset":{"url":sys.argv[5],"sha256":sys.argv[6]},"replaces":{"npm":{"dependencies":["npm"]}}}; json.dump({"plugins":[c,n]}, open(sys.argv[4],"w"))' \
+    "$root/catalog.json" "http://127.0.0.1:$port/plugin.lua" "$digest" "$catalog" "$NPM_PLUGIN_URL" "$NPM_PLUGIN_SHA256"
 }
 
 grep_clauses_in() {
@@ -126,10 +135,14 @@ grep_clauses_in() {
 run_migrate_case() {
   serve_plugin || return 1
   status=0
+  # --resolve unless the case says otherwise: pinning a migrated project's
+  # dependencies is the one step that fetches anything unpinned.
+  resolve=--resolve
+  [ -f "$case_dir/without-resolve" ] && resolve=
   # env.txt holds NAME=value lines exported to migrate alone, which is how a case
   # points npm at a registry that refuses, without touching the host's npm.
   (cd "$sandbox" && { [ ! -f "$case_dir/env.txt" ] || { set -a; . "$case_dir/env.txt"; set +a; }; } &&
-    "$daukle" migrate --catalog "$catalog" >stdout.txt 2>stderr.txt) || status=$?
+    "$daukle" migrate --catalog "$catalog" $resolve >stdout.txt 2>stderr.txt) || status=$?
   wanted=$(cat "$case_dir/expect-exit.txt")
   if [ "$status" -ne "$wanted" ]; then
     fail "$label" "migrate exited $status, wanted $wanted"
@@ -433,7 +446,7 @@ run_case() {
     mkdir -p "$(dirname "$sandbox")"
     cp -R "$case_dir" "$sandbox"
     restore_ignore_files "$sandbox"
-    (cd "$sandbox" && rm -f migrate needs-node expect-*.txt task-after.txt env.txt)
+    (cd "$sandbox" && rm -f migrate needs-node without-resolve expect-*.txt task-after.txt env.txt)
     run_migrate_case && passed=$((passed + 1))
     return 0
   fi
@@ -521,6 +534,7 @@ run_case() {
 rm -rf "$work"
 for case_dir in "$root"/test/cases/*/; do
   [ -d "$case_dir" ] || continue
+  [ -z "$only_case" ] || [ "$(basename "$case_dir")" = "$only_case" ] || continue
   run_case "${case_dir%/}"
 done
 

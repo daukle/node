@@ -2,9 +2,12 @@ local runtimes = daukle.require("lib/runtimes")
 local scripts = daukle.require("lib/scripts")
 local links = daukle.require("lib/links")
 local package_fields = daukle.require("lib/package_fields")
+local pins = daukle.require("lib/pins")
 
-local KNOWN_KEYS = { version = true, entry = true, packages = true, devPackages = true,
-                     scripts = true, type = true, [package_fields.KEY] = true }
+local KNOWN_KEYS = { version = true, entry = true, scripts = true, type = true,
+                     [package_fields.KEY] = true, [pins.KEY] = true }
+
+local MOVED_TO_NPM = { packages = true, devPackages = true }
 
 --- The fields the generated package.json writes itself, which `packageFields` cannot name.
 local WRITTEN = { [links.MARKER_KEY] = true, type = true, private = true, dependencies = true,
@@ -17,6 +20,10 @@ end
 
 local function reject_unknown_keys(config)
   for key in pairs(config) do
+    if MOVED_TO_NPM[key] then
+      error(string.format('"%s" moved to [toolchains.npm] in daukle/node 4, where daukle/npm pins'
+                          .. ' the closure it resolves to: an install resolves no range', key), 0)
+    end
     if KNOWN_KEYS[key] == nil then
       error(string.format('"%s" is not a key this toolchain knows: a misspelled key would'
                           .. ' otherwise be ignored and build the wrong thing silently', key), 0)
@@ -101,26 +108,12 @@ local function checked_range(name, range, key)
   return range
 end
 
-local function checked_packages(config, key)
-  local packages = config[key]
-  if packages == nil then return {} end
-  if type(packages) ~= "table" then
-    error('"' .. key .. '" must be a table of package name to version range, not a '
-          .. type(packages), 0)
-  end
-  if #packages > 0 then
-    error('"' .. key .. '" must be a table of package name to version range, not a list:'
-          .. ' a list says nothing about which version of a package is wanted', 0)
-  end
-  local names = {}
-  for name, range in pairs(packages) do
-    local problem = package_name_problem(name)
+local function checked_ranges(names, ranges, key)
+  for index = 1, #names do
+    local problem = package_name_problem(names[index])
     if problem ~= nil then error(problem, 0) end
-    checked_range(name, range, key)
-    names[#names + 1] = name
+    checked_range(names[index], ranges[names[index]], key)
   end
-  table.sort(names)
-  return names, packages
 end
 
 local function json_object(names, packages, indent)
@@ -159,8 +152,10 @@ end
 local function read(context)
   local config = config_of(context)
   reject_unknown_keys(config)
-  local packages, package_ranges = checked_packages(config, "packages")
-  local dev_packages, dev_ranges = checked_packages(config, "devPackages")
+  local pinned = pins.read(config) or { packages = {}, package_ranges = {}, dev_packages = {},
+                                         dev_ranges = {} }
+  checked_ranges(pinned.packages, pinned.package_ranges, "dependencies")
+  checked_ranges(pinned.dev_packages, pinned.dev_ranges, "devDependencies")
   local declared_scripts = scripts.read(config)
   local field_names, fields = package_fields.checked(config, WRITTEN)
   return {
@@ -170,10 +165,11 @@ local function read(context)
     entry = entry_of(config),
     type = type_of(config),
     scripts = declared_scripts,
-    packages = packages,
-    package_ranges = package_ranges,
-    dev_packages = dev_packages,
-    dev_ranges = dev_ranges,
+    packages = pinned.packages,
+    package_ranges = pinned.package_ranges,
+    dev_packages = pinned.dev_packages,
+    dev_ranges = pinned.dev_ranges,
+    lock = pinned.text ~= nil and pinned or nil,
   }
 end
 

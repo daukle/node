@@ -130,10 +130,26 @@ local function proof_of(context)
   }
 end
 
-local function result(context, config, blockers, owned)
+local function has_any(map)
+  return map ~= nil and next(map) ~= nil
+end
+
+--- The dependencies, handed to daukle/npm's translator rather than written here: npm's block
+--- holds the ranges and its pin file the closure, so node's own block carries neither.
+local function dependencies_of(config, lock_text)
+  local packages, dev_packages = config.packages, config.devPackages
+  config.packages, config.devPackages = nil, nil
+  if lock_text == nil or not (has_any(packages) or has_any(dev_packages)) then return {} end
+  return { { kind = "dependencies", id = "npm",
+             config = { version = config.version, packages = packages or {},
+                        devPackages = dev_packages or {}, lock = lock_text } } }
+end
+
+local function result(context, config, blockers, owned, lock_text)
+  local foreign = dependencies_of(config, lock_text)
   return {
     manifest = { toolchains = { [context.instance] = config } },
-    foreign = {},
+    foreign = foreign,
     blockers = blockers,
     owned = owned,
     proof = proof_of(context),
@@ -261,6 +277,17 @@ local function file_blockers(context, facts, blockers)
   return blockers
 end
 
+--- The closure the migrated project pins: the project's own lockfile when it holds npm 7's
+--- `packages` map, so it installs exactly what it did, and otherwise the one the probe's
+--- install wrote.
+local function lock_of(context, files)
+  if files.exists["package-lock.json"] then
+    local text = daukle.read(within(context.dir, "package-lock.json"))
+    if (daukle.json_parse(text).lockfileVersion or 1) >= 2 then return text end
+  end
+  return daukle.read(derived(context, "migrate-probe/package-lock.json"))
+end
+
 local function run(context)
   local where = within(context.dir, "package.json")
   local files = file_facts(context)
@@ -269,6 +296,7 @@ local function run(context)
     return result(context, translation.config, file_blockers(context, files, translation.blockers), { where })
   end
   local facts, unresolved = probe(context, translation.config)
+  local lock_text = unresolved == nil and lock_of(context, files) or nil
   local blockers
   if unresolved ~= nil then
     blockers = { { construct = "package.json", where = where,
@@ -291,7 +319,7 @@ local function run(context)
   local owned = { where }
   if files.exists["package-lock.json"] then owned[#owned + 1] = within(context.dir, "package-lock.json") end
   if files.exists["node_modules"] then owned[#owned + 1] = within(context.dir, "node_modules") end
-  return result(context, translation.config, blockers, owned)
+  return result(context, translation.config, blockers, owned, lock_text)
 end
 
 local function build(context)
