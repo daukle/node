@@ -1,1 +1,0 @@
-holds a character that would have to be escaped

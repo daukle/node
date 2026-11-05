@@ -1,17 +1,18 @@
 # node-hello-dependency
 
-A managed Node project with a dependency. The repository holds `daukle.toml` and `src/` and
-**nothing else**: no `package.json`, no `package-lock.json`, no `node_modules` and no `.npmrc` are
-committed. daukle downloads a Node runtime, verifies it against a digest
-the plugin pins, generates a `package.json` into `build/daukle/node/`, and drives the npm that
-runtime bundles.
+A managed Node project with a dependency. The repository holds `daukle.toml`, `src/` and the pin
+file `daukle/npm/lock.lua`, which `daukle npm:resolve --resolve` wrote, and **nothing else**: no
+`package.json`, no `package-lock.json`, no `node_modules` and no `.npmrc` are committed. daukle
+downloads a Node runtime, verifies it against a digest the plugin pins, generates a `package.json`
+into `build/daukle/node/`, and drives the npm that runtime bundles.
 
 ```console
 $ daukle node:run
 hello from daukle: 42 is even
 ```
 
-`daukle node:install` provisions node and installs `is-even` into `build/daukle/node/`, and
+`daukle node:install` provisions node, fetches `is-even` and its closure against the sha256 each
+has in `daukle/npm/lock.lua`, and installs them into `build/daukle/node/` with no network, and
 `node:run` does that first if needed. `daukle tasks` lists the two tasks and their order.
 
 Run `ls` afterwards. Beside `daukle.toml`, `src/` and `build/` the root now holds a `node_modules`
