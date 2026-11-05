@@ -145,8 +145,10 @@ toolchain cannot.
   project installs exactly what it did, and from a fresh resolve otherwise. Pinning fetches every
   package once, so a project with dependencies migrates as `daukle migrate --resolve`; without
   the flag the report names it.
-- `engines.node`, as `version`: the newest pinned node that satisfies the range. With none, the
-  newest pinned node.
+- `engines`, verbatim as `packageFields.engines`, and as `version`: the newest pinned node that
+  satisfies `engines.node` and whose bundled npm satisfies `engines.npm`. With neither, the newest
+  pinned node.
+- Every other field it does not know, verbatim as `packageFields`.
 - `type`, as `type`.
 - `main`, as `entry`, when the project declares no scripts.
 - `scripts` made of `node <file> <args>`, `npm run <name>` (and `npm test`, `start`, `stop`,
@@ -174,8 +176,9 @@ toolchain cannot.
 - Lifecycle scripts, and a `pre<x>` or `post<x>` beside an `<x>`.
 - `workspaces`, `overrides`, `peerDependencies`, `optionalDependencies`, the project's own `bin`,
   `exports`, `imports`, `files`, `publishConfig`, `packageManager` and the other fields
-  `NPM-SURFACE.md` records absent, and any field the migrator does not know.
-- Every `engines` key other than `node`.
+  `NPM-SURFACE.md` records absent, and a field named with an escape it cannot carry verbatim.
+- An `engines.node` or `engines.npm` range no pinned release satisfies, or one it cannot read, and
+  an `engines` that is not a map.
 - An `npm-shrinkwrap.json`, `.npmrc`, `.nvmrc` or `.node-version`, and another package manager's
   lockfile: `yarn.lock`, `pnpm-lock.yaml`, `bun.lock` or `bun.lockb`.
 

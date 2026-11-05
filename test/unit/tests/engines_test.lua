@@ -1,15 +1,16 @@
 local engines = daukle.require("lib/engines")
 local expect = daukle.require("tests/expect")
 
-local function picks(range, wanted)
-  return { name = "picks " .. tostring(wanted) .. " for " .. tostring(range), check = function()
-    return expect.equal((engines.newest_satisfying(range)), wanted)
+local function picks(range, wanted, npm_range)
+  return { name = "picks " .. tostring(wanted) .. " for " .. tostring(range) .. " " .. tostring(npm_range),
+           check = function()
+    return expect.equal((engines.newest_satisfying(range, npm_range)), wanted)
   end }
 end
 
-local function refuses(range, needle)
-  return { name = "refuses " .. range, check = function()
-    local version, reason = engines.newest_satisfying(range)
+local function refuses(range, needle, npm_range)
+  return { name = "refuses " .. range .. " " .. tostring(npm_range), check = function()
+    local version, reason = engines.newest_satisfying(range, npm_range)
     if version ~= nil then return "wanted a refusal, got " .. version end
     return expect.contains(reason, needle)
   end }
@@ -29,7 +30,10 @@ return {
   picks("v26.3.1", "26.3.1"),
   picks("=22.15.0", "22.15.0"),
   picks("<=22.15", "22.15.0"),
+  picks("*", "24.21.0", ">=11.17"),
+  picks(">=22", "22.15.0", "^10"),
   refuses("<20", "no pinned node satisfies"),
+  refuses("^26", "bundles an npm satisfying", "^10"),
   refuses("^20.1.0", "no pinned node satisfies"),
   refuses("22.15.0-beta.1", "cannot read"),
   refuses(">=lts", "cannot read"),
