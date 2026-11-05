@@ -446,6 +446,8 @@ run_case() {
     mkdir -p "$(dirname "$sandbox")"
     cp -R "$case_dir" "$sandbox"
     restore_ignore_files "$sandbox"
+    # Its own repository, or node:install would write this repository's info/exclude.
+    git init -q "$sandbox"
     (cd "$sandbox" && rm -f migrate needs-node without-resolve expect-*.txt task-after.txt env.txt)
     run_migrate_case && passed=$((passed + 1))
     return 0
@@ -474,6 +476,8 @@ run_case() {
     mkdir -p "$(dirname "$sandbox")"
     cp -R "$case_dir" "$sandbox"
     restore_ignore_files "$sandbox"
+    # Its own repository, or node:install would write this repository's info/exclude.
+    git init -q "$sandbox"
     rm -rf "$sandbox/expected" "$sandbox/expect-error.txt" "$sandbox/task.txt" \
            "$sandbox/expect-task-error.txt" "$sandbox/expect-output.txt" \
            "$sandbox/unchanged.txt" "$sandbox/needs-node" \

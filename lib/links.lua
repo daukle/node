@@ -132,6 +132,50 @@ function placeManifest() {
   writeFileSync(placedRecord, bytes);
 }
 
+/** @implNote a worktree's `.git` is a file naming its own git directory, whose `commondir` names the shared one, and git reads `info/exclude` from the shared one alone. */
+function sharedGitDirectory(dotGit, entry) {
+  if (entry.isDirectory()) return dotGit;
+  if (!entry.isFile()) return null;
+  const pointer = /^gitdir:[ \t]*(.+?)[ \t]*$/m.exec(readFileSync(dotGit, "utf8"));
+  if (pointer === null) return null;
+  const gitDirectory = resolve(dirname(dotGit), pointer[1]);
+  const commonFile = join(gitDirectory, "commondir");
+  if (!existsSync(commonFile)) return gitDirectory;
+  return resolve(gitDirectory, readFileSync(commonFile, "utf8").trim());
+}
+
+function enclosingRepository() {
+  for (let directory = packageRoot; ; directory = dirname(directory)) {
+    const dotGit = join(directory, ".git");
+    const entry = entryAt(dotGit);
+    if (entry !== null) {
+      const gitDirectory = sharedGitDirectory(dotGit, entry);
+      return gitDirectory === null ? null : { root: directory, gitDirectory };
+    }
+    if (dirname(directory) === directory) return null;
+  }
+}
+
+/** @implNote no pattern ends in a slash: git classifies a POSIX symlink as a file, so a directory-only pattern would not exclude the link. */
+function excludePattern(repositoryRoot, path) {
+  return "/" + relative(repositoryRoot, path).split(sep).join("/").replace(/[\\*?[\]]/g, "\\$&");
+}
+
+/** Keeps the placed entries out of git through the clone's own `info/exclude`, so no project file is edited; outside a git repository there is nothing to keep them out of. */
+function excludeFromRepository() {
+  const repository = enclosingRepository();
+  if (repository === null) return;
+  const excludeFile = join(repository.gitDirectory, "info", "exclude");
+  const present = existsSync(excludeFile) ? readFileSync(excludeFile, "utf8") : "";
+  const lines = new Set(present.split(/\r?\n/));
+  const missing = [rootModules, rootManifest].map((path) => excludePattern(repository.root, path))
+    .filter((pattern) => !lines.has(pattern));
+  if (missing.length === 0) return;
+  const separator = present === "" || present.endsWith("\n") ? "" : "\n";
+  mkdirSync(dirname(excludeFile), { recursive: true });
+  writeFileSync(excludeFile, present + separator + missing.join("\n") + "\n");
+}
+
 let modules;
 try {
   modules = modulesAction();
@@ -143,6 +187,7 @@ try {
 }
 placeModules(modules);
 placeManifest();
+excludeFromRepository();
 ]==]
 
 local function json_string(text)
