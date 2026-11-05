@@ -1,7 +1,8 @@
 # daukle/node
 
 The Node toolchain, in managed mode. It provisions a runtime, generates a `package.json` into the
-derived directory, and drives the npm that runtime bundles. `node:install` places two entries at
+derived directory, and drives the npm that runtime bundles. Dependencies are `daukle/npm`'s: it
+pins them, and `node:install` installs exactly those. `node:install` places two entries at
 the package root so that a tool which resolves `node_modules` or reads `package.json` itself finds
 them, and nothing else is written there.
 
@@ -25,9 +26,30 @@ package, sorted, to `build/daukle/node/dependency-tree.txt` and to the terminal.
 | `version` | which node daukle runs: an exact version or `>=`, never below `22.15.0`. Required |
 | `entry` | the module `node:run` runs. Optional; `node:run` needs it when no script is declared |
 | `scripts` | a script per task, below |
-| `packages`, `devPackages` | package name to version range |
 | `type` | `"module"` or `"commonjs"`: the module system of your own `.js` files, as `type` in a `package.json`. Unset forces nothing. A nested `package.json` below the package root decides for the files under it, as in node, where one with no `type` means CommonJS. `daukle migrate` still blocks such a file, because its resolution fields are not carried, searching every directory but `node_modules`, `.git` and `build/daukle` |
 | `packageFields` | fields of a `package.json` this toolchain does not model, such as `browserslist`, `lint-staged` or `sideEffects`, each as its own JSON text: `browserslist = '["> 1%"]'`. Written verbatim into the generated `package.json`, which `node:install` places at the package root, so a tool that reads `package.json` itself finds them; npm ignores a field it does not know. A field this toolchain writes or models, or one it has no equivalent for, is refused, and so is text that is not exactly one JSON value. `daukle migrate` writes it for every field it does not know |
+
+## Dependencies
+
+They are declared in `[toolchains.npm]`, not here, and pinned by `daukle/npm`:
+
+```toml
+[plugins]
+npm = "daukle/npm@^2"
+node = "daukle/node@^4"
+
+[toolchains.npm]
+version = "22.15.0"
+packages = { react-dom = "^18.3.1" }
+devPackages = { typescript = "~5.6.0" }
+```
+
+`daukle npm:resolve --resolve` has npm compute the closure and writes it, every package pinned by
+sha256, to the committed `daukle/npm/lock.lua`. `node:install` then fetches each package this host
+installs against its sha256, hands it to npm's cache, and runs `npm ci --offline`: no range is
+resolved and npm reaches no network. A build with ranges and no pins, or ranges changed since the
+resolve, is refused naming the resolve command. `packages` and `devPackages` in `[toolchains.node]`
+were this toolchain's keys up to 3.x and are refused by name since 4.0.0.
 
 A module of yours, run by `node:run` or a script, has the package root as its working directory: the
 directory of the instance (`dir`), or the project root. A relative path in a module means what it
@@ -118,7 +140,11 @@ toolchain cannot.
 
 **What migrates**
 
-- `dependencies` and `devDependencies`, as `packages` and `devPackages`.
+- `dependencies` and `devDependencies`, as `packages` and `devPackages` in `[toolchains.npm]`,
+  pinned from the project's own `package-lock.json` when it is version 2 or later, so the migrated
+  project installs exactly what it did, and from a fresh resolve otherwise. Pinning fetches every
+  package once, so a project with dependencies migrates as `daukle migrate --resolve`; without
+  the flag the report names it.
 - `engines.node`, as `version`: the newest pinned node that satisfies the range. With none, the
   newest pinned node.
 - `type`, as `type`.

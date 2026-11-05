@@ -9,11 +9,15 @@ url = "https://raw.githubusercontent.com/daukle/daukle/1f515141e06d16eace718a459
 sha256 = "3789865c266eb53fafcf7300d77a24461170c615195d92d0ddf88078c556e23e"
 
 [plugins]
-node = { resolver = "github", coordinate = "daukle/node@^1.0.0" }
+npm = { url = "https://github.com/daukle/npm/releases/download/2.1.0/plugin.lua", sha256 = "12d18faf6b72cffc6da76afe678d231ee7820229f63fd466206021dd89a2d5f6" }
+node = { resolver = "github", coordinate = "daukle/node@^4.0.0" }
 
 [toolchains.node]
 version = ">=22.15.0"
 entry = "src/main.mjs"
 
-[toolchains.node.packages]
+[toolchains.npm]
+version = ">=22.15.0"
+
+[toolchains.npm.packages]
 is-even = "1.0.0"

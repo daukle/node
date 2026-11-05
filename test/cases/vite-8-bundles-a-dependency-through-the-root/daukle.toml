@@ -5,6 +5,7 @@ version = "1.0.0"
 [modules]
 
 [plugins]
+npm = { url = "https://github.com/daukle/npm/releases/download/2.1.0/plugin.lua", sha256 = "12d18faf6b72cffc6da76afe678d231ee7820229f63fd466206021dd89a2d5f6" }
 node = "./plugins/node"
 
 # vite 8 bundles with Rolldown, whose resolver is native and walks up from the
@@ -13,10 +14,13 @@ node = "./plugins/node"
 version = "26.3.1"
 type = "module"
 
-  [toolchains.node.packages]
+  [toolchains.npm]
+  version = "26.3.1"
+
+  [toolchains.npm.packages]
   semver = "7.6.3"
 
-  [toolchains.node.devPackages]
+  [toolchains.npm.devPackages]
   vite = "8.3.4"
 
   [toolchains.node.scripts]

@@ -1,6 +1,6 @@
 daukle.plugin{
   api = 3,
-  uses = { "provision", "exec", "read", "parse", "write", "json_parse", "list" },
+  uses = { "provision", "artifact", "exec", "read", "parse", "write", "json_parse", "list" },
   exports = { "lib/runtimes" },
 }
 
@@ -12,13 +12,14 @@ local paths = daukle.require("lib/paths")
 local tree = daukle.require("lib/tree")
 local links = daukle.require("lib/links")
 local glob = daukle.require("lib/glob")
+local pins = daukle.require("lib/pins")
 
 daukle.toolchain{
   name = "node",
   generate = function(context)
     local spec = settings.read(context)
     runtimes.for_host{ os = context.host.os, arch = context.host.arch, version = spec.version }
-    return {
+    local files = {
       ["package.json"] = settings.package_json(spec),
       [runners.RESOLVER_NAME] = runners.resolver_for(spec.type),
       [runners.BIN_RUNNER_NAME] = runners.BIN_RUNNER,
@@ -26,6 +27,8 @@ daukle.toolchain{
       [tree.SCRIPT_NAME] = tree.SCRIPT,
       [links.SCRIPT_NAME] = links.SCRIPT,
     }
+    if spec.lock ~= nil then files["package-lock.json"] = spec.lock.text end
+    return files
   end,
 }
 
@@ -40,16 +43,37 @@ local function provision_node(context, spec)
   return root, pick
 end
 
---[[ @implNote "npm ci" is not reachable: it is wanted only when a lockfile is
-     present and a plugin cannot ask whether a file exists, since daukle.read
-     raises on a missing one and pcall is not in the sandbox. It is also not
-     wanted. ci refuses when the lockfile disagrees with package.json, and
-     daukle GENERATES package.json, so the only way they can disagree is that
-     the manifest changed, which is exactly when reconciling is right and
-     refusing is wrong. ]]
+--- npm's own cache, in the derived directory, which the pinned tarballs are added to.
+local NPM_CACHE = "npm-cache"
+
+--- Tarballs per `npm cache add`, which keeps one command line far below Windows' 32,767
+--- characters at any path length daukle's cache produces.
+local CACHE_ADD_BATCH = 50
+
+local function cache_pinned_tarballs(node, npm, lock, host)
+  local entries = pins.for_host(lock.entries, host)
+  for first = 1, #entries, CACHE_ADD_BATCH do
+    local argv = { npm, "cache", "add", "--cache", NPM_CACHE }
+    for index = first, math.min(first + CACHE_ADD_BATCH - 1, #entries) do
+      local entry = entries[index]
+      argv[#argv + 1] = daukle.artifact{ url = entry.url, sha256 = entry.sha256, as = entry.as }
+    end
+    daukle.exec(node, argv)
+  end
+end
+
+--- Installs exactly the pinned closure, with npm reaching no network: every tarball this host
+--- installs is fetched by daukle against its sha256 and handed to npm's cache, which npm keys
+--- by the lockfile's integrity, so a tarball missing from it fails ENOTCACHED naming it.
 local function install_packages(context, spec)
   local root, pick = provision_node(context, spec)
-  daukle.exec(root:tool(pick.node), { root:path(pick.npm), "install" })
+  local node, npm = root:tool(pick.node), root:path(pick.npm)
+  if spec.lock == nil then
+    daukle.exec(node, { npm, "install", "--offline", "--no-audit", "--no-fund" })
+    return root, pick
+  end
+  cache_pinned_tarballs(node, npm, spec.lock, context.host)
+  daukle.exec(node, { npm, "ci", "--offline", "--cache", NPM_CACHE, "--no-audit", "--no-fund" })
   return root, pick
 end
 
