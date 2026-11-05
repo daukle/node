@@ -165,16 +165,11 @@ applies ignore rules only to untracked files, so the first `node:install` rewrit
 `git commit -a` would commit the generated copy. Run `git rm --cached package.json` (and
 `git rm -r --cached node_modules` if `node_modules` was tracked), then commit.
 
-## `node` and `npm` are two halves of one language
+## `node` and `npm`
 
-They are easy to confuse and they are not alternatives:
-
-| | |
-| --- | --- |
-| **`daukle/node`** | managed mode. daukle owns the generated `package.json` and provisions the runtime |
-| **`daukle/npm`** | adopted mode. It edits a `package.json` **you** own, and needs npm already installed |
-
-They are two repositories because core refuses one chunk to hold both a toolchain and a language.
+`daukle/node` is the toolchain: daukle owns the generated `package.json` and provisions the
+runtime. `daukle/npm` is being redesigned as its resolver, pinning every package of the closure by
+its registry integrity digest; nothing of that is released yet.
 
 ## How module resolution works
 
