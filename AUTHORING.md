@@ -233,8 +233,9 @@ one of its rows.
   code (`ETARGET`, `E404`, `ERESOLVE`, `EUNSUPPORTEDPROTOCOL`, `EINVALIDTAGNAME`, `E401`, `E403`)
   is one blocker carrying npm's lines and its log path, beside the file blockers, with only the
   bins step skipped. Any other code, or none, is the host's failure and a plugin error (exit 1).
-- **Nothing is dropped silently.** An unknown field, every `engines` key other than `node`, a
-  non-map `engines`, a dependency name or a `main` that `lib/settings.lua` would refuse, a
+- **Nothing is dropped silently.** An unknown field is carried verbatim as `packageFields`, and so
+  is `engines`, beside the `version` read from it. A field named with an escape that cannot be
+  carried, a non-map `engines`, a dependency name or a `main` that `lib/settings.lua` would refuse, a
   `workspace:` or `catalog:` range, and the files above other than `package-lock.json` and
   `node_modules` are blockers. Metadata that no build reads is dropped by name.
   `package-lock.json` and `node_modules` are owned and move aside.
@@ -266,9 +267,8 @@ Measured 2026-10-06: **109 `package.json` files under `F:/Documents/GitHub` decl
 value into this key, and it is refused.
 
 **They are not the same fact.** `version` here is **which node daukle RUNS**; `engines.node` is what
-your published package supports. **The generated `package.json` carries no `engines` at all**, so
-this toolchain never touches yours: write `">=22.15.0"` here and keep your own range where it was.
-The refusal says so now.
+your published package supports, so write `">=22.15.0"` here and keep your own range in
+`packageFields.engines`, which the generated `package.json` carries verbatim. The refusal says so.
 
 **`version` has no default.** `daukle/java` defaults because a JDK major is a thing a project can
 have no opinion about; the node release here also fixes the npm major, which it cannot.

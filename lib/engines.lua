@@ -1,6 +1,6 @@
 local runtimes = daukle.require("lib/runtimes")
 
-local UNREADABLE = 'cannot read the engines.node range "%s": it is read as npm\'s semver ranges'
+local UNREADABLE = 'cannot read the engines.%s range "%s": it is read as npm\'s semver ranges'
                    .. ' without prerelease tags'
 
 local function partial(text)
@@ -122,19 +122,55 @@ local function sets_of(range)
   return sets
 end
 
---- The newest pinned node that satisfies an engines.node range, or the newest
---- pinned node when the package names no range at all.
-local function newest_satisfying(range)
-  local pinned = runtimes.pinned()
-  if range == nil then return pinned[1] end
-  if type(range) ~= "string" then return nil, string.format(UNREADABLE, tostring(range)) end
+--- The parsed range, `true` when there is no range at all, or nil and why it cannot be read.
+local function constraint_of(engine, range)
+  if range == nil then return true end
+  if type(range) ~= "string" then return nil, string.format(UNREADABLE, engine, tostring(range)) end
   local sets = sets_of(range)
-  if sets == nil then return nil, string.format(UNREADABLE, range) end
-  for _, text in ipairs(pinned) do
-    if satisfies(full(partial(text)), sets) then return text end
+  if sets == nil then return nil, string.format(UNREADABLE, engine, range) end
+  return sets
+end
+
+local function admits(constraint, version)
+  return constraint == true or satisfies(full(partial(version)), constraint)
+end
+
+local function listed(releases, field)
+  local out = {}
+  for index, release in ipairs(releases) do out[index] = release[field] end
+  return table.concat(out, ", ")
+end
+
+local function bundled(releases)
+  local out = {}
+  for index, release in ipairs(releases) do out[index] = release.version .. " with npm " .. release.npm end
+  return table.concat(out, ", ")
+end
+
+--- The newest pinned node that satisfies an engines.node range and whose bundled
+--- npm satisfies an engines.npm range, either range absent meaning any.
+---
+--- @return string|nil version, string|nil why, string|nil engine the refused engine's name
+local function newest_satisfying(node_range, npm_range)
+  local node, node_why = constraint_of("node", node_range)
+  if node == nil then return nil, node_why, "node" end
+  local npm, npm_why = constraint_of("npm", npm_range)
+  if npm == nil then return nil, npm_why, "npm" end
+  local releases = runtimes.releases()
+  local node_matched = false
+  for _, release in ipairs(releases) do
+    if admits(node, release.version) then
+      node_matched = true
+      if admits(npm, release.npm) then return release.version end
+    end
   end
-  return nil, string.format('no pinned node satisfies the engines.node range "%s": this plugin pins %s',
-                            range, table.concat(pinned, ", "))
+  if not node_matched then
+    return nil, string.format('no pinned node satisfies the engines.node range "%s": this plugin pins %s',
+                              node_range, listed(releases, "version")), "node"
+  end
+  return nil, string.format('no pinned node that satisfies engines.node bundles an npm satisfying the'
+                            .. ' engines.npm range "%s": this plugin pins %s', npm_range,
+                            bundled(releases)), "npm"
 end
 
 return { newest_satisfying = newest_satisfying }
