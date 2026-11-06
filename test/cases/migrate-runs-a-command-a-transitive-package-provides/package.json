@@ -1,0 +1,1 @@
+{"private":true,"devDependencies":{"rimraf":"5.0.10"},"scripts":{"list":"glob a.txt"}}
