@@ -73,7 +73,8 @@ local function install_packages(context, spec)
     return root, pick
   end
   cache_pinned_tarballs(node, npm, spec.lock, context.host)
-  daukle.exec(node, { npm, "ci", "--offline", "--cache", NPM_CACHE, "--no-audit", "--no-fund" })
+  daukle.exec(node, { npm, "ci", "--offline", "--cache", NPM_CACHE, "--no-audit", "--no-fund" },
+              { env = spec.lock.env })
   return root, pick
 end
 
