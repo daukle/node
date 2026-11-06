@@ -1,0 +1,2 @@
+demo-pack-1.2.3.tgz
+package/lib/index.js

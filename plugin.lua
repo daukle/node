@@ -14,6 +14,8 @@ local links = daukle.require("lib/links")
 local glob = daukle.require("lib/glob")
 local pins = daukle.require("lib/pins")
 local npm_launcher = daukle.require("lib/npm_launcher")
+local pack = daukle.require("lib/pack")
+local published = daukle.require("lib/published")
 
 daukle.toolchain{
   name = "node",
@@ -30,6 +32,10 @@ daukle.toolchain{
       [npm_launcher.SCRIPT_NAME] = npm_launcher.SCRIPT,
     }
     if spec.lock ~= nil then files["package-lock.json"] = spec.lock.text end
+    if spec.published ~= nil then
+      files[pack.MANIFEST_NAME] = published.manifest(spec)
+      files[pack.SCRIPT_NAME] = pack.SCRIPT
+    end
     return files
   end,
 }
@@ -97,13 +103,47 @@ local function install_packages(context, spec)
   return root, pick
 end
 
+local function install_and_link(context, spec)
+  local root, pick = install_packages(context, spec)
+  daukle.exec(root:tool(pick.node), { "./" .. links.SCRIPT_NAME, context.root })
+  return root, pick
+end
+
 daukle.task{
   name = "node:install",
   run = function(context)
-    local spec = settings.read(context)
-    local root, pick = install_packages(context, spec)
-    daukle.exec(root:tool(pick.node), { "./" .. links.SCRIPT_NAME, context.root })
+    install_and_link(context, settings.read(context))
   end,
+}
+
+--[[ @implNote no dependsOn node:install: the migration proof packs while the
+     author's package.json is still at the root, where node:install would place
+     its own. The stage step exits NO_ROOT_MANIFEST on a root with none, and only
+     then is node:install's work done first. ]]
+daukle.task{
+  name = "node:pack",
+  run = function(context)
+    local spec = settings.read(context)
+    if spec.published == nil then
+      error('nothing to pack: "' .. published.KEY .. '" names no package, and npm pack needs its name'
+            .. ' and version', 0)
+    end
+    local root, pick = provision_node(context, spec)
+    local node, npm = root:tool(pick.node), root:path(pick.npm)
+    local argv = { "./" .. pack.SCRIPT_NAME, "stage", npm, context.root, pack.MANIFEST_NAME, pack.STAGE_DIR, "." }
+    local result = daukle.exec(node, argv, { check = false })
+    if result.code == pack.NO_ROOT_MANIFEST then
+      install_and_link(context, spec)
+      result = daukle.exec(node, argv, { check = false })
+    end
+    if result.code ~= 0 then error("node:pack: node exited with code " .. result.code, 0) end
+  end,
+}
+
+daukle.task{
+  name = "node:migration-proof",
+  dependsOn = { "node:tree", "node:pack" },
+  run = function() end,
 }
 
 --[[ @implNote the migration proof runs before core moves the old package.json

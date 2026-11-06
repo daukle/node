@@ -3,9 +3,10 @@ local scripts = daukle.require("lib/scripts")
 local links = daukle.require("lib/links")
 local package_fields = daukle.require("lib/package_fields")
 local pins = daukle.require("lib/pins")
+local published = daukle.require("lib/published")
 
 local KNOWN_KEYS = { version = true, entry = true, scripts = true, type = true,
-                     [package_fields.KEY] = true, [pins.KEY] = true }
+                     [package_fields.KEY] = true, [pins.KEY] = true, [published.KEY] = true }
 
 local MOVED_TO_NPM = { packages = true, devPackages = true }
 
@@ -149,6 +150,29 @@ local function package_json(spec)
     .. '}\n'
 end
 
+--- The consumer-facing fields `node:pack` publishes, or nil when the package is not packed.
+local function published_of(config)
+  local value = config[published.KEY]
+  if value == nil then return nil end
+  if type(value) ~= "table" then
+    error('"' .. published.KEY .. '" must be a table of field name to its JSON text, not a ' .. type(value), 0)
+  end
+  for name, text in pairs(value) do
+    local label = '"' .. published.KEY .. "." .. tostring(name) .. '"'
+    if not published.FIELDS[name] then
+      error(label .. " is not a field this table publishes: it holds the name, version, metadata,"
+            .. ' "main" and "files", and every other field has a key of its own', 0)
+    end
+    if type(text) ~= "string" or not package_fields.is_json_value(text) then
+      error(label .. " must be one JSON value as text, such as '\"1.0.0\"'", 0)
+    end
+  end
+  if value.name == nil or value.version == nil then
+    error('"' .. published.KEY .. '" needs a "name" and a "version", which npm pack names the tarball by', 0)
+  end
+  return value
+end
+
 local function read(context)
   local config = config_of(context)
   reject_unknown_keys(config)
@@ -170,6 +194,7 @@ local function read(context)
     dev_packages = pinned.dev_packages,
     dev_ranges = pinned.dev_ranges,
     lock = pinned.text ~= nil and pinned or nil,
+    published = published_of(config),
   }
 end
 
