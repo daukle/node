@@ -1,0 +1,6 @@
+{
+  "name": "demo-shim-pack-compat",
+  "private": true,
+  "main": "../index.js",
+  "types": "../index.d.ts"
+}

@@ -1,3 +1,5 @@
+local links = daukle.require("lib/links")
+
 local SCRIPT_NAME = "__daukle_pack__.mjs"
 local MANIFEST_NAME = "pack-package.json"
 local TARBALL_NAME = "package.tgz"
@@ -74,6 +76,24 @@ function record(tarball, destination) {
   process.stdout.write(`${tarball}\n`);
 }
 
+const MARKER_KEY = "]==] .. links.MARKER_KEY .. [==[";
+const MARKER_TEXT = "]==] .. links.MARKER_TEXT .. [==[";
+
+/** A nested package.json node:install placed, without the marker that says so: the package ships
+ *  the file it declared, which a migrated package's proof compares by value. */
+function stageFile(source, target, file) {
+  if (file.endsWith("/package.json")) {
+    const text = readFileSync(source, "utf8");
+    const manifest = JSON.parse(text);
+    if (Object.keys(manifest)[0] === MARKER_KEY && manifest[MARKER_KEY] === MARKER_TEXT) {
+      delete manifest[MARKER_KEY];
+      writeFileSync(target, JSON.stringify(manifest, null, 2) + "\n");
+      return;
+    }
+  }
+  copyFileSync(source, target);
+}
+
 async function stage(root, manifestPath, stageDirectory, destination) {
   if (!existsSync(join(root, "package.json"))) process.exit(]==] .. NO_ROOT_MANIFEST .. [==[);
   const npm = createRequire(join(dirname(dirname(npmCli)), "package.json"));
@@ -87,7 +107,7 @@ async function stage(root, manifestPath, stageDirectory, destination) {
   for (const file of files) {
     if (file === "package.json" || DAUKLE_ROOT_ENTRIES.has(file.split("/")[0])) continue;
     mkdirSync(dirname(join(stageDirectory, file)), { recursive: true });
-    copyFileSync(join(root, file), join(stageDirectory, file));
+    stageFile(join(root, file), join(stageDirectory, file), file);
   }
   writeFileSync(join(stageDirectory, "package.json"), manifestText);
   record(pack(stageDirectory, destination), destination);
