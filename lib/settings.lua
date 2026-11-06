@@ -3,11 +3,12 @@ local scripts = daukle.require("lib/scripts")
 local links = daukle.require("lib/links")
 local package_fields = daukle.require("lib/package_fields")
 local pins = daukle.require("lib/pins")
+local pnpm_pins = daukle.require("lib/pnpm_pins")
 local published = daukle.require("lib/published")
 local nested = daukle.require("lib/nested")
 
 local KNOWN_KEYS = { version = true, entry = true, scripts = true, type = true,
-                     [package_fields.KEY] = true, [pins.KEY] = true, [published.KEY] = true,
+                     [package_fields.KEY] = true, [pins.KEY] = true, [pnpm_pins.KEY] = true, [published.KEY] = true,
                      [nested.KEY] = true }
 
 local MOVED_TO_NPM = { packages = true, devPackages = true }
@@ -141,10 +142,23 @@ local function carried_fields(names, values)
 end
 
 --- @implNote an offline `npm ci` checks each lockfile edge against the package.json beside it,
---- so an edge the pinned overrides changed asks the registry unless the overrides are here too.
-local function overrides_field(text)
-  if text == nil then return "" end
-  return ',\n  "overrides": ' .. text
+--- so an edge the pinned overrides changed asks the registry unless the overrides are here too;
+--- pnpm reads its own from `pnpm.overrides` and refuses a frozen install when they differ.
+local function overrides_field(spec)
+  if spec.overrides == nil then return "" end
+  if spec.pnpm_lock ~= nil then return ',\n  "pnpm": { "overrides": ' .. spec.overrides .. ' }' end
+  return ',\n  "overrides": ' .. spec.overrides
+end
+
+--- The pins of whichever resolver wrote them: daukle/npm's or daukle/pnpm's, never both.
+local function pinned_of(config)
+  local npm_pinned, pnpm_pinned = pins.read(config), pnpm_pins.read(config)
+  if npm_pinned ~= nil and pnpm_pinned ~= nil then
+    error("this toolchain carries both npm's and pnpm's pins, and a package root installs with one"
+          .. " package manager: remove one of [toolchains.npm] and [toolchains.pnpm]", 0)
+  end
+  return npm_pinned or pnpm_pinned or { packages = {}, package_ranges = {}, dev_packages = {}, dev_ranges = {} },
+         pnpm_pinned
 end
 
 local function package_json(spec)
@@ -155,7 +169,7 @@ local function package_json(spec)
     .. '  "private": true,\n'
     .. '  "dependencies": ' .. json_object(spec.packages, spec.package_ranges, "  ") .. ',\n'
     .. '  "devDependencies": ' .. json_object(spec.dev_packages, spec.dev_ranges, "  ")
-    .. overrides_field(spec.overrides)
+    .. overrides_field(spec)
     .. carried_fields(spec.field_names, spec.fields) .. '\n'
     .. '}\n'
 end
@@ -186,8 +200,7 @@ end
 local function read(context)
   local config = config_of(context)
   reject_unknown_keys(config)
-  local pinned = pins.read(config) or { packages = {}, package_ranges = {}, dev_packages = {},
-                                         dev_ranges = {} }
+  local pinned, pnpm_lock = pinned_of(config)
   checked_ranges(pinned.packages, pinned.package_ranges, "dependencies")
   checked_ranges(pinned.dev_packages, pinned.dev_ranges, "devDependencies")
   local declared_scripts = scripts.read(config)
@@ -204,7 +217,8 @@ local function read(context)
     dev_packages = pinned.dev_packages,
     dev_ranges = pinned.dev_ranges,
     overrides = pinned.overrides,
-    lock = pinned.text ~= nil and pinned or nil,
+    lock = pinned.text ~= nil and pnpm_lock == nil and pinned or nil,
+    pnpm_lock = pnpm_lock,
     published = published_of(config),
     nested = nested.read(config),
   }
