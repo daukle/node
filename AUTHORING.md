@@ -275,10 +275,10 @@ one of its rows.
 - **A package that declares `"files"`, or a non-private one with a `main` beside scripts, is
   PACKED** (`D-238`, spec `2026-11-06-npm-packing-design.md`). Its `name`, `version`, metadata,
   `main` and `files` go into the `package` key as raw JSON text, and its proof is
-  `node:migration-proof`, which runs `node:tree` and `node:pack` and also compares
-  `pack-listing.txt`: one `path sha256` line per tarball member, `package.json` hashed over
-  canonical JSON, because the packed manifest is rendered from the toolchain's keys and not the
-  author's bytes. The old side is npm's own `npm pack` of the original package. A script the
+  `node:migration-proof`, which runs `node:tree` and `node:pack` and also compares the tarball
+  itself, kept as `package.tgz` on both sides, with core's `as = "archive-json"` (api 9): every
+  member by its bytes and `package.json` by its parsed value, because the packed manifest is
+  rendered from the toolchain's keys and not the author's bytes (`D-250`). The old side is npm's own `npm pack` of the original package. A script the
   package publishes must render back from its steps to exactly the declared text
   (`lib/published.lua`), or it is a blocker naming it: `npm test` renders as `npm run test`.
 - **`node:pack` packs with npm's own code.** `lib/pack.lua`'s script asks the provisioned npm's
