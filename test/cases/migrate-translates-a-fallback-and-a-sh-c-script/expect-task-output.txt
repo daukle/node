@@ -1,0 +1,2 @@
+lint a.js b.js
+write a.js b.js

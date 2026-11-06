@@ -1,5 +1,5 @@
 local SHELL_CHARACTER = "[|;<>$`*?(){}~\\&!#%%%^%[%]]"
-local SHELL_WORDS = { cd = true, rm = true, cp = true, mv = true, mkdir = true, echo = true,
+local SHELL_WORDS = { cd = true, rm = true, cp = true, mv = true, mkdir = true,
                       set = true, export = true, cat = true, test = true,
                       exec = true, time = true, exit = true, ["true"] = true, ["false"] = true,
                       ["if"] = true, ["then"] = true, ["for"] = true, ["while"] = true,
@@ -23,7 +23,7 @@ end
      other shell character, because npm hands the body to sh on one host and
      cmd.exe on another, and the two disagree about what a quoted metacharacter
      does. ]]
-local function words_of(text)
+local function words_of(text, allows_passed)
   local words, index, length = {}, 1, #text
   while index <= length do
     local character = string.sub(text, index, index)
@@ -37,8 +37,13 @@ local function words_of(text)
         return nil, string.format(SHELL, string.sub(text, index, closing + 1))
       end
       local quoted = string.sub(text, index + 1, closing - 1)
-      if has_other_shell_character(quoted) then return nil, string.format(SHELL, quoted) end
-      words[#words + 1] = quoted
+      if allows_passed and character == '"' and quoted == "$@" then
+        words[#words + 1] = { passed = true }
+      elseif has_other_shell_character(quoted) then
+        return nil, string.format(SHELL, quoted)
+      else
+        words[#words + 1] = quoted
+      end
       index = closing + 1
     else
       local finish = (string.find(text, "[%s\"']", index) or length + 1) - 1
@@ -54,16 +59,43 @@ local function words_of(text)
   return words
 end
 
+--- The pieces of a body between `&&` and `||`, and the operator after each but the last.
+local function pieces_of(body)
+  local pieces, operators, start = {}, {}, 1
+  while true do
+    local found, _, operator = string.find(body, "([&|][&|])", start)
+    while found ~= nil and operator ~= "&&" and operator ~= "||" do
+      found, _, operator = string.find(body, "([&|][&|])", found + 1)
+    end
+    if found == nil then break end
+    pieces[#pieces + 1] = string.sub(body, start, found - 1)
+    operators[#operators + 1] = operator
+    start = found + 2
+  end
+  pieces[#pieces + 1] = string.sub(body, start)
+  return pieces, operators
+end
+
+--- The body a `sh -c '<body>' <name>` hands its shell, or nil when the script is not one.
+---
+--- @implNote only a single-quoted body with a `$0` name and nothing after it: words after the
+--- name would become `$1`... for the body, which a step has no way to say.
+local function shell_body_of(body)
+  return string.match(body, "^%s*sh%s+%-c%s+'([^']*)'%s+[%w_%.%-]+%s*$")
+end
+
 local function parse(body)
   if string.find(body, "[\r\n]") then return nil, string.format(SHELL, "a line break") end
+  local inner = shell_body_of(body)
+  local pieces, operators = pieces_of(inner or body)
   local segments = {}
-  for piece in string.gmatch(body .. "&&", "(.-)&&") do
-    local words, reason = words_of(piece)
+  for _, piece in ipairs(pieces) do
+    local words, reason = words_of(piece, inner ~= nil)
     if words == nil then return nil, reason end
-    if #words == 0 then return nil, "has an empty step around \"&&\"" end
+    if #words == 0 then return nil, "has an empty step around \"&&\" or \"||\"" end
     segments[#segments + 1] = words
   end
-  return { segments = segments }
+  return { segments = segments, operators = operators }
 end
 
 local function rest_of(words, from)
@@ -134,9 +166,29 @@ local function remove_step(words)
   return step
 end
 
+--- `echo` as a step printing its words.
+---
+--- @implNote a flag is refused rather than passed: `-n` and `-e` mean different things to the sh
+--- and the cmd.exe npm hands a script to, so there is no one behaviour to translate.
+local function echo_step(words)
+  local printed = rest_of(words, 2)
+  for _, word in ipairs(printed) do
+    if type(word) == "string" and string.sub(word, 1, 1) == "-" then
+      return nil, string.format('passes "%s" to echo, which a print step cannot carry', word)
+    end
+  end
+  return { echo = printed }
+end
+
 local function with_env(step, env)
   if step ~= nil and env ~= nil then step.env = env end
   return step
+end
+
+--- A word that expands at run time, as the shell wrote it: a glob, or `"$@"`'s passed arguments.
+local function generated_word(word)
+  if word.glob ~= nil then return word.glob .. '", a glob' end
+  return '$@", the passed arguments'
 end
 
 local function step_of(segment, declared)
@@ -146,11 +198,15 @@ local function step_of(segment, declared)
     return nil, 'only sets environment variables, which a shell keeps for later commands and a step cannot'
   end
   if type(first) ~= "string" then
-    return nil, string.format(SHELL, first.glob .. '", a glob naming the command')
+    return nil, string.format(SHELL, generated_word(first) .. ' naming the command')
   end
   if first == "rm" then
     if env ~= nil then return nil, 'sets environment variables for "rm", which a remove step cannot carry' end
     return remove_step(words)
+  end
+  if first == "echo" then
+    if env ~= nil then return nil, 'sets environment variables for "echo", which a print step cannot carry' end
+    return echo_step(words)
   end
   if RUNNERS[first] then
     return nil, string.format('runs "%s", which fetches or runs code outside the provisioned node',
@@ -164,7 +220,7 @@ local function step_of(segment, declared)
   if first == "node" then
     if words[2] == nil then return nil, 'runs "node" with nothing to run' end
     if type(words[2]) ~= "string" then
-      return nil, string.format(SHELL, words[2].glob .. '", a glob naming the module')
+      return nil, string.format(SHELL, generated_word(words[2]) .. ' naming the module')
     end
     if string.sub(words[2], 1, 1) == "-" then
       return nil, string.format('passes the flag "%s" to node, which a module step cannot carry',

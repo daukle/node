@@ -1,0 +1,3 @@
+passed = true
+[[toolchains.node.scripts.prepare.attempt]]
+echo = [""]

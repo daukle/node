@@ -149,7 +149,11 @@ local function translated_script(name, body, declared, where, blockers)
       blocker(blockers, construct, where, why, SURFACE.shell)
       return nil
     end
-    steps[index] = step
+    if parsed.operators[index - 1] == "||" then
+      steps = { { attempt = steps, otherwise = { step } } }
+    else
+      steps[#steps + 1] = step
+    end
   end
   if #steps == 1 then return steps[1] end
   return steps
@@ -206,9 +210,19 @@ local function engine_ranges(package, where, blockers)
   return map.node, map.npm
 end
 
+--- Every step of a script, an `attempt` step's own steps included, in order.
 local function steps_in(step_or_steps)
-  if step_or_steps[1] ~= nil then return step_or_steps end
-  return { step_or_steps }
+  local listed = step_or_steps[1] ~= nil and step_or_steps or { step_or_steps }
+  local out = {}
+  for _, step in ipairs(listed) do
+    if step.attempt ~= nil then
+      for _, inner in ipairs(steps_in(step.attempt)) do out[#out + 1] = inner end
+      for _, inner in ipairs(steps_in(step.otherwise)) do out[#out + 1] = inner end
+    else
+      out[#out + 1] = step
+    end
+  end
+  return out
 end
 
 --- Every top-level member's name, sorted.

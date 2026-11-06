@@ -28,6 +28,7 @@ daukle.toolchain{
       [runners.RESOLVER_NAME] = runners.resolver_for(spec.type),
       [runners.BIN_RUNNER_NAME] = runners.BIN_RUNNER,
       [runners.REMOVER_NAME] = runners.REMOVER,
+      [runners.ECHO_NAME] = runners.ECHO,
       [tree.SCRIPT_NAME] = tree.SCRIPT,
       [links.SCRIPT_NAME] = links.SCRIPT,
       [npm_launcher.SCRIPT_NAME] = npm_launcher.SCRIPT,
@@ -105,12 +106,12 @@ local function install_packages(context, spec)
   return root, pick
 end
 
-local run_steps
+local run_steps, run_script_steps
 
 --- Runs the project's own `prepare`, which npm runs after a bare install and before a pack (D-243).
 local function run_prepare(context, spec)
   for _, script in ipairs(spec.scripts) do
-    if script.name == "prepare" then run_steps(context, spec, script) end
+    if script.name == "prepare" then run_script_steps(context, spec, script) end
   end
 end
 
@@ -192,22 +193,26 @@ end
 --[[ @implNote --import is resolved against the working directory, which is the
      package root here, so the resolver is named relative to it and starts with
      "./" or "../" to stay a relative URL rather than a bare specifier. ]]
+--- Runs a module on the provisioned node and returns its exit code, so a caller can fall back.
 local function run_module(context, root, pick, module_path, args, env)
   local derived = derived_from_package_root(context)
   local resolver = (string.sub(derived, 1, 3) == "../" and "" or "./") .. derived .. "/"
                    .. runners.RESOLVER_NAME
   local argv = { "--import", resolver, module_path }
   for index = 1, #args do argv[#argv + 1] = args[index] end
-  daukle.exec(root:tool(pick.node), argv, { cwd = package_root(context), env = env })
+  return daukle.exec(root:tool(pick.node), argv, { cwd = package_root(context), env = env, check = false }).code
 end
 
---- A step's arguments with every `{ glob = ... }` expanded against the package root.
-local function expanded(context, args)
+--- A step's arguments with every `{ glob = ... }` expanded against the package root and every
+--- `{ passed = true }` replaced by the script's passed arguments.
+local function expanded(context, args, passed)
   local root = package_root(context)
   if root == "." then root = "" end
   local out = {}
   for _, argument in ipairs(args) do
-    if type(argument) == "table" then
+    if type(argument) == "table" and argument.passed then
+      for _, word in ipairs(passed or {}) do out[#out + 1] = word end
+    elseif type(argument) == "table" then
       for _, path in ipairs(glob.expand(root, argument.glob)) do out[#out + 1] = path end
     else
       out[#out + 1] = argument
@@ -234,7 +239,8 @@ daukle.task{
     local spec = settings.read(context)
     refuse_a_project_with_no_entry(spec)
     local root, pick = provision_node(context, spec)
-    run_module(context, root, pick, spec.entry, {})
+    local code = run_module(context, root, pick, spec.entry, {})
+    if code ~= 0 then error("node:run: " .. spec.entry .. " exited with code " .. code, 0) end
   end,
 }
 
@@ -245,36 +251,78 @@ local function joined(first, second)
   return out
 end
 
---- Runs a script's steps, `appended` going to the end of the last one, which is where npm puts the
---- words after `npm run <name> --`: it appends them to the script's command line (D-244).
-function run_steps(context, spec, script, appended)
-  for index = 1, #script.steps do
-    local step = script.steps[index]
-    local extra = index == #script.steps and (appended or {}) or {}
-    if step.kind == "script" then
-      -- read() has already refused a reference to no script and a cycle, so a
-      -- second check here would be a second place for the rule to disagree.
-      for other = 1, #spec.scripts do
-        if spec.scripts[other].name == step.name then
-          run_steps(context, spec, spec.scripts[other], joined(step.args, extra))
-        end
-      end
-    elseif step.kind == "module" then
-      local root, pick = provision_node(context, spec)
-      run_module(context, root, pick, step.name, expanded(context, joined(step.args, extra)), step.env)
-    elseif step.kind == "remove" then
-      local root, pick = provision_node(context, spec)
-      local argv = { step.recursive and "1" or "0", step.force and "1" or "0" }
-      for _, path in ipairs(expanded(context, joined(step.paths, extra))) do argv[#argv + 1] = path end
-      run_module(context, root, pick, derived_from_package_root(context) .. "/" .. runners.REMOVER_NAME, argv)
-    else
-      local root, pick = provision_node(context, spec)
-      local argv = { step.name, step.binName or "" }
-      for _, argument in ipairs(expanded(context, joined(step.args, extra))) do argv[#argv + 1] = argument end
-      run_module(context, root, pick, derived_from_package_root(context) .. "/" .. runners.BIN_RUNNER_NAME, argv,
-                 step.env)
+local function takes_passed_arguments(steps)
+  for _, step in ipairs(steps) do
+    if step.kind == "attempt" then
+      if takes_passed_arguments(step.attempt) or takes_passed_arguments(step.otherwise) then return true end
+    end
+    for _, argument in ipairs(step.args or step.paths or {}) do
+      if type(argument) == "table" and argument.passed then return true end
     end
   end
+  return false
+end
+
+local run_step_list
+
+--- Runs one step and returns its exit code. `extra` is appended to its words; `passed` fills
+--- each `{ passed = true }`.
+local function run_step(context, spec, step, extra, passed)
+  local runner = derived_from_package_root(context) .. "/"
+  if step.kind == "attempt" then
+    local code = run_step_list(context, spec, step.attempt, {}, passed)
+    if code == 0 then return 0 end
+    return run_step_list(context, spec, step.otherwise, extra, passed)
+  end
+  if step.kind == "script" then
+    -- read() has already refused a reference to no script and a cycle, so a
+    -- second check here would be a second place for the rule to disagree.
+    for other = 1, #spec.scripts do
+      if spec.scripts[other].name == step.name then
+        return run_steps(context, spec, spec.scripts[other], joined(expanded(context, step.args, passed), extra))
+      end
+    end
+  end
+  local root, pick = provision_node(context, spec)
+  if step.kind == "module" then
+    return run_module(context, root, pick, step.name, expanded(context, joined(step.args, extra), passed), step.env)
+  end
+  if step.kind == "remove" then
+    local argv = { step.recursive and "1" or "0", step.force and "1" or "0" }
+    for _, path in ipairs(expanded(context, joined(step.paths, extra), passed)) do argv[#argv + 1] = path end
+    return run_module(context, root, pick, runner .. runners.REMOVER_NAME, argv)
+  end
+  if step.kind == "echo" then
+    return run_module(context, root, pick, runner .. runners.ECHO_NAME, expanded(context, joined(step.args, extra), passed))
+  end
+  local argv = { step.name, step.binName or "" }
+  for _, argument in ipairs(expanded(context, joined(step.args, extra), passed)) do argv[#argv + 1] = argument end
+  return run_module(context, root, pick, runner .. runners.BIN_RUNNER_NAME, argv, step.env)
+end
+
+--- Runs steps until one fails, `extra` going to the last, and returns the exit code: 0, or the
+--- failing step's, which is what `&&` stops on and `||` falls back on.
+function run_step_list(context, spec, steps, extra, passed)
+  for index, step in ipairs(steps) do
+    local code = run_step(context, spec, step, index == #steps and extra or {}, passed)
+    if code ~= 0 then return code end
+  end
+  return 0
+end
+
+--- Runs a script's steps and returns the exit code. `appended` goes to the end of the last step,
+--- which is where npm puts the words after `npm run <name> --` (D-244), unless the script came
+--- from a `sh -c`, whose `"$@"` words take them instead (D-249).
+function run_steps(context, spec, script, appended)
+  if takes_passed_arguments(script.steps) then
+    return run_step_list(context, spec, script.steps, {}, appended or {})
+  end
+  return run_step_list(context, spec, script.steps, appended or {}, nil)
+end
+
+function run_script_steps(context, spec, script)
+  local code = run_steps(context, spec, script)
+  if code ~= 0 then error(string.format('scripts."%s" failed: a step exited with code %d', script.name, code), 0) end
 end
 
 -- The NAME is closed over and the script is looked up at task time, because the
@@ -285,7 +333,7 @@ local function run_script(script_name)
     local spec = settings.read(context)
     for index = 1, #spec.scripts do
       if spec.scripts[index].name == script_name then
-        run_steps(context, spec, spec.scripts[index])
+        run_script_steps(context, spec, spec.scripts[index])
         return
       end
     end
