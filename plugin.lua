@@ -13,6 +13,7 @@ local tree = daukle.require("lib/tree")
 local links = daukle.require("lib/links")
 local glob = daukle.require("lib/glob")
 local pins = daukle.require("lib/pins")
+local npm_launcher = daukle.require("lib/npm_launcher")
 
 daukle.toolchain{
   name = "node",
@@ -26,6 +27,7 @@ daukle.toolchain{
       [runners.REMOVER_NAME] = runners.REMOVER,
       [tree.SCRIPT_NAME] = tree.SCRIPT,
       [links.SCRIPT_NAME] = links.SCRIPT,
+      [npm_launcher.SCRIPT_NAME] = npm_launcher.SCRIPT,
     }
     if spec.lock ~= nil then files["package-lock.json"] = spec.lock.text end
     return files
@@ -74,6 +76,12 @@ local function offline_ci(npm, lock)
   return argv
 end
 
+--- An npm command line that runs lifecycle scripts, run through the launcher so they get this node.
+local function through_launcher(npm_argv)
+  table.insert(npm_argv, 1, "./" .. npm_launcher.SCRIPT_NAME)
+  return npm_argv
+end
+
 --- Installs exactly the pinned closure, with npm reaching no network: every tarball this host
 --- installs is fetched by daukle against its sha256 and handed to npm's cache, which npm keys
 --- by the lockfile's integrity, so a tarball missing from it fails ENOTCACHED naming it.
@@ -81,11 +89,11 @@ local function install_packages(context, spec)
   local root, pick = provision_node(context, spec)
   local node, npm = root:tool(pick.node), root:path(pick.npm)
   if spec.lock == nil then
-    daukle.exec(node, { npm, "install", "--offline", "--no-audit", "--no-fund" })
+    daukle.exec(node, through_launcher({ npm, "install", "--offline", "--no-audit", "--no-fund" }))
     return root, pick
   end
   cache_pinned_tarballs(node, npm, spec.lock, context.host)
-  daukle.exec(node, offline_ci(npm, spec.lock), { env = spec.lock.env })
+  daukle.exec(node, through_launcher(offline_ci(npm, spec.lock)), { env = spec.lock.env })
   return root, pick
 end
 
