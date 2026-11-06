@@ -33,7 +33,8 @@ function npm(directory, destination, args, capture) {
 function pack(directory, destination, scripts = false) {
   const flags = scripts ? [] : ["--ignore-scripts"];
   const stdout = npm(directory, destination, ["pack", ...flags, "--json", "--pack-destination", destination], true);
-  return join(destination, JSON.parse(stdout)[0].filename);
+  const json = stdout.startsWith("[") ? stdout : stdout.slice(stdout.lastIndexOf("\n[") + 1);
+  return join(destination, JSON.parse(json)[0].filename);
 }
 
 const NOT_COPIED = new Set([".git", "node_modules"]);
