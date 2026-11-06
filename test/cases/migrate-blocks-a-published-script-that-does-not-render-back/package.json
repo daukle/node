@@ -1,0 +1,7 @@
+{
+  "name": "demo-pack",
+  "version": "1.2.3",
+  "main": "check.js",
+  "files": ["check.js"],
+  "scripts": { "check": "node check.js", "all": "npm run-script check" }
+}

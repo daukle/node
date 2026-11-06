@@ -4,6 +4,9 @@ local tree = daukle.require("lib/tree")
 local paths = daukle.require("lib/paths")
 local npm_errors = daukle.require("lib/npm_errors")
 local npmrc = daukle.require("lib/npmrc")
+local pack = daukle.require("lib/pack")
+local published = daukle.require("lib/published")
+local scripts = daukle.require("lib/scripts")
 
 local PROBE_NAME = "__daukle_probe__.mjs"
 
@@ -125,15 +128,37 @@ local function json_object(map)
   return "{" .. table.concat(parts, ", ") .. "}"
 end
 
-local function proof_of(context)
-  return {
-    task = context.instance .. ":tree",
-    compare = { {
-      old = derived(context, "migrate-old/" .. tree.OUTPUT_NAME),
-      new = derived(context, tree.OUTPUT_NAME),
-      as = "bytes",
-    } },
-  }
+local function proof_of(context, config)
+  local compare = { {
+    old = derived(context, "migrate-old/" .. tree.OUTPUT_NAME),
+    new = derived(context, tree.OUTPUT_NAME),
+    as = "bytes",
+  } }
+  if config[published.KEY] == nil then return { task = context.instance .. ":tree", compare = compare } end
+  compare[2] = { old = derived(context, "migrate-old/" .. pack.LISTING_NAME),
+                 new = derived(context, pack.LISTING_NAME), as = "bytes" }
+  return { task = context.instance .. ":migration-proof", compare = compare }
+end
+
+local PUBLISHED_ROW = "7. Packing and publishing: `scripts` in the packed manifest"
+
+--- A blocker for each script a packed package publishes that its steps do not render back to
+--- exactly, because the packed manifest is rendered from the steps (ruling 5.2). Called only once
+--- every command resolved, since scripts.read refuses a step that still names a bare command.
+local function unpublishable_scripts(config, original, where)
+  local blockers = {}
+  if config[published.KEY] == nil or type(original) ~= "table" then return blockers end
+  for _, script in ipairs(scripts.read({ scripts = config.scripts })) do
+    local rendered = published.render(script.steps)
+    if rendered ~= original[script.name] then
+      blockers[#blockers + 1] = { construct = 'scripts."' .. script.name .. '"', where = where,
+                                  why = string.format('is published in the packed package.json as "%s",'
+                                        .. ' which is not the "%s" the package declares',
+                                        rendered, tostring(original[script.name])),
+                                  surface = "NPM-SURFACE.md: " .. PUBLISHED_ROW }
+    end
+  end
+  return blockers
 end
 
 local function has_any(map)
@@ -160,7 +185,7 @@ local function result(context, config, blockers, owned, lock_text)
     foreign = foreign,
     blockers = blockers,
     owned = owned,
-    proof = proof_of(context),
+    proof = proof_of(context, config),
   }
 end
 
@@ -342,6 +367,9 @@ local function run(context)
                    surface = "NPM-SURFACE.md: " .. UNRESOLVED_ROW } }
   else
     blockers = translate.resolve_commands(translation.config, facts.bins, where)
+    if #blockers == 0 then
+      blockers = unpublishable_scripts(translation.config, translation.original_scripts, where)
+    end
   end
   file_blockers(context, files, blockers)
   for _, entry in ipairs(ROOT_ENTRIES) do
@@ -386,6 +414,13 @@ local function build(context)
   daukle.exec(root:tool(pick.node), install, { cwd = derived(context, "migrate-old"), env = env })
   daukle.write{ path = "migrate-old/" .. tree.SCRIPT_NAME, text = tree.SCRIPT }
   daukle.exec(root:tool(pick.node), { "./" .. tree.SCRIPT_NAME }, { cwd = derived(context, "migrate-old") })
+  if translation.config[published.KEY] ~= nil then
+    daukle.write{ path = "migrate-old/" .. pack.SCRIPT_NAME, text = pack.SCRIPT }
+    local climb = paths.climb_from(context.dir)
+    daukle.exec(root:tool(pick.node), { climb .. derived(context, "migrate-old/" .. pack.SCRIPT_NAME), "in-place",
+                                        root:path(pick.npm), ".", climb .. derived(context, "migrate-old") },
+                { cwd = context.dir or "." })
+  end
 end
 
 return { run = run, build = build }

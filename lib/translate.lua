@@ -3,6 +3,7 @@ local command_line = daukle.require("lib/command_line")
 local scripts = daukle.require("lib/scripts")
 local settings = daukle.require("lib/settings")
 local package_fields = daukle.require("lib/package_fields")
+local published = daukle.require("lib/published")
 
 local SURFACE = {
   dependencies = "3. Dependencies",
@@ -15,7 +16,6 @@ local SURFACE = {
   engines_field = "1. The runtime: `engines.node` / `engines.npm` in the package",
   module = "1. The runtime: `node <module>`",
   type = "2. Module resolution: the project's own `\"type\"`",
-  main = package_fields.ROWS.main,
   tarball = "3. Dependencies: a tarball URL holding `?`, `%` or `&`",
   local_path = "3. Dependencies: local paths, `file:`",
   workspaces = package_fields.ROWS.workspaces,
@@ -183,13 +183,7 @@ local function entry_of(package, has_scripts, where, blockers)
     blocker(blockers, '"main"', where, "is not a path", SURFACE.publishing)
     return nil
   end
-  if has_scripts then
-    if package.private ~= true then
-      blocker(blockers, '"main"', where, "is the entry this package offers its consumers, and"
-              .. " publishing is absent", SURFACE.main)
-    end
-    return nil
-  end
+  if has_scripts then return nil end
   local entry = string.gsub(main, "^%./", "")
   if not settings.is_project_path(entry) then
     blocker(blockers, '"main"', where, string.format('names "%s", which is not a module inside'
@@ -245,6 +239,35 @@ local function carry_field(config, key, raw, where, blockers)
   config[package_fields.KEY][key] = raw
 end
 
+--- Whether `node:pack` publishes this package: where it declares what a tarball holds, or offers
+--- consumers a `main` that is not its own run entry, which only packing gives a meaning (D-238).
+local function is_packed(parsed, has_scripts)
+  return parsed.files ~= nil or (parsed.main ~= nil and parsed.private ~= true and has_scripts)
+end
+
+--- The consumer-facing fields as their raw JSON text, for `node:pack`'s manifest.
+local function published_fields(parsed, raw, where, blockers)
+  local out = {}
+  for _, key in ipairs(member_names(parsed, raw)) do
+    if published.FIELDS[key] then
+      if raw[key] == nil then
+        blocker(blockers, '"' .. key .. '"', where, "is named with an escape this migrator cannot"
+                .. " carry verbatim into the packed manifest", SURFACE.publishing)
+      else
+        out[key] = raw[key]
+      end
+    end
+  end
+  for _, required in ipairs({ "name", "version" }) do
+    if type(parsed[required]) ~= "string" then
+      blocker(blockers, '"' .. required .. '"', where, "is missing or not a string, and npm pack names"
+              .. " the tarball of a package that declares \"files\" or offers a \"main\" by it",
+              SURFACE.publishing)
+    end
+  end
+  return out
+end
+
 local function package(text, where)
   local blockers = {}
   if type(text) == "string" and string.sub(text, 1, 3) == BOM then text = string.sub(text, 4) end
@@ -278,13 +301,14 @@ local function package(text, where)
   end
   config.scripts = translated_scripts(parsed, where, blockers)
   config.entry = entry_of(parsed, config.scripts ~= nil, where, blockers)
+  if is_packed(parsed, config.scripts ~= nil) then config[published.KEY] = published_fields(parsed, raw, where, blockers) end
   local commands = {}
   for _, step_or_steps in pairs(config.scripts or {}) do
     for _, step in ipairs(steps_in(step_or_steps)) do
       if step.command ~= nil then commands[step.command] = true end
     end
   end
-  return { config = config, blockers = blockers, commands = commands }
+  return { config = config, blockers = blockers, commands = commands, original_scripts = parsed.scripts }
 end
 
 --[[ @implNote the bin runner looks "binName or the package name" up in a map

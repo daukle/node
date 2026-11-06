@@ -1,0 +1,2 @@
+scripts."all"
+npm run check
