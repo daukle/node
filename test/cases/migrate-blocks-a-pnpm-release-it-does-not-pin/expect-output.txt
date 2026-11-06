@@ -1,0 +1,2 @@
+"packageManager"
+names pnpm "8.15.2", a release daukle/pnpm does not pin

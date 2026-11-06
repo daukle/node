@@ -1,0 +1,9 @@
+{
+  "private": true,
+  "packageManager": "pnpm@8.15.2",
+  "dependencies": { "debug": "4.3.4" },
+  "scripts": {
+    "start": "node src/main.js",
+    "go": "pnpm run start"
+  }
+}
