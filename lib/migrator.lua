@@ -283,7 +283,7 @@ end
 
 local REFUSED_FILES = {
   { name = "npm-shrinkwrap.json", why = NPM_CONFIGURATION,
-    row = "4. Install, lockfile and registry configuration: a committed `package-lock.json` or `npm-shrinkwrap.json`" },
+    row = "4. Install, lockfile and registry configuration: an `npm-shrinkwrap.json`" },
   { name = ".nvmrc", why = VERSION_MANAGER, row = "1. The runtime" },
   { name = ".node-version", why = VERSION_MANAGER, row = "1. The runtime" },
   { name = "yarn.lock", why = FOREIGN_LOCKFILE, row = FOREIGN_LOCKFILE_ROW },
