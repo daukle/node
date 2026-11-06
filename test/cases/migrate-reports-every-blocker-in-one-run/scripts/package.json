@@ -1,1 +1,1 @@
-{"name":"inner"}
+{"name":"inner","imports":{"#a":"./a.js"}}
