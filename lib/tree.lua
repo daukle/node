@@ -3,7 +3,7 @@ local OUTPUT_NAME = "dependency-tree.txt"
 
 --[[ @implNote dot entries are skipped because npm keeps its own bookkeeping
      there (.bin, .package-lock.json), which differs between an npm ci and an
-     npm install of the same tree. ]]
+     npm install of the same tree; pnpm's .pnpm is read apart, by its entries. ]]
 local SCRIPT = [==[
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -42,7 +42,18 @@ function walk(modules, prefix) {
   }
 }
 
+/** pnpm's virtual store, one directory per installed package id: a package's own dependencies are
+ *  its siblings there rather than below it, so the walk above reaches only the direct ones. */
+function virtualStore(modules) {
+  const store = join(modules, ".pnpm");
+  if (!existsSync(store)) return;
+  for (const entry of readdirSync(store, { withFileTypes: true })) {
+    if (entry.isDirectory() && entry.name !== "node_modules") lines.push(`.pnpm ${entry.name}`);
+  }
+}
+
 walk(join(here, "node_modules"), "");
+virtualStore(join(here, "node_modules"));
 lines.sort();
 const text = lines.join("\n") + "\n";
 writeFileSync(join(here, "]==] .. OUTPUT_NAME .. [==["), text);

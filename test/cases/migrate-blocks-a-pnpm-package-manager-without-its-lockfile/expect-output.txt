@@ -1,0 +1,2 @@
+"packageManager"
+commits no pnpm-lock.yaml for daukle/pnpm to pin

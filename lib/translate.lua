@@ -294,6 +294,16 @@ local function overrides_of(parsed, raw, where, blockers)
   return raw.overrides
 end
 
+--- The pnpm release a `"packageManager": "pnpm@<version>"` names, or nil for any other value.
+---
+--- @implNote a corepack `+sha512.<hex>` suffix is dropped: daukle/pnpm pins the release by its own
+--- sha256 and refuses one it does not pin.
+local function pnpm_release_of(package_manager)
+  if type(package_manager) ~= "string" then return nil end
+  return string.match(package_manager, "^pnpm@(%d+%.%d+%.%d+)$")
+         or string.match(package_manager, "^pnpm@(%d+%.%d+%.%d+)%+sha%d+%.[%x]+$")
+end
+
 local function package(text, where)
   local blockers = {}
   if type(text) == "string" and string.sub(text, 1, 3) == BOM then text = string.sub(text, 4) end
@@ -305,8 +315,11 @@ local function package(text, where)
   local parsed = daukle.json_parse(text)
   local config = {}
   local raw = package_fields.raw_members(text)
+  local pnpm = pnpm_release_of(parsed.packageManager)
   for _, key in ipairs(member_names(parsed, raw)) do
-    if ABSENT_FIELDS[key] ~= nil then
+    if key == "packageManager" and pnpm ~= nil then
+      config.pnpm = pnpm
+    elseif ABSENT_FIELDS[key] ~= nil then
       blocker(blockers, '"' .. key .. '"', where, "has no equivalent in this toolchain",
               ABSENT_FIELDS[key])
     elseif not READ[key] and not METADATA[key] then

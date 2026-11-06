@@ -4,7 +4,17 @@ local SHELL_WORDS = { cd = true, rm = true, cp = true, mv = true, mkdir = true,
                       exec = true, time = true, exit = true, ["true"] = true, ["false"] = true,
                       ["if"] = true, ["then"] = true, ["for"] = true, ["while"] = true,
                       source = true, ["."] = true, sh = true, bash = true, zsh = true, dash = true }
-local RUNNERS = { npx = true, pnpm = true, yarn = true, bun = true, deno = true }
+local RUNNERS = { npx = true, yarn = true, bun = true, deno = true }
+
+--- pnpm's own commands, which win over a script of the same name in `pnpm <name>`.
+local PNPM_COMMANDS = {}
+for name in string.gmatch("add audit bin config create dedupe deploy dlx doctor env exec fetch i"
+                          .. " import init install install-test it licenses link list ln ls outdated"
+                          .. " pack patch patch-commit patch-remove prune publish rb rebuild recursive"
+                          .. " remove rm root self-update server setup store un uninstall unlink up"
+                          .. " update upgrade why", "%S+") do
+  PNPM_COMMANDS[name] = true
+end
 local NPM_SCRIPT_VERBS = { test = "test", t = "test", start = "start", stop = "stop",
                            restart = "restart" }
 
@@ -134,6 +144,32 @@ local function npm_step(words, declared)
   return { script = target, args = args }
 end
 
+--- `pnpm run <script>`, `pnpm test`, `pnpm start` and the `pnpm <script>` shorthand, as a script
+--- step. Arguments are refused: pnpm hands every word after the name to the script, `--` included
+--- in some releases, so there is no one translation of them.
+local function pnpm_step(words, declared)
+  local verb = words[2]
+  if type(verb) ~= "string" then return nil, 'runs "pnpm" with nothing to run' end
+  local target, from = verb, 3
+  if verb == "dlx" or verb == "exec" then
+    return nil, string.format('runs "pnpm %s", which fetches or runs code outside the provisioned node', verb)
+  end
+  if verb == "run" or verb == "run-script" then
+    target, from = words[3], 4
+  elseif verb == "t" or verb == "tst" then
+    target = "test"
+  elseif PNPM_COMMANDS[verb] or string.sub(verb, 1, 1) == "-" then
+    return nil, string.format('runs "pnpm %s", which has no daukle equivalent', verb)
+  end
+  if type(target) ~= "string" or not declared[target] then
+    return nil, string.format('runs "%s", which is not a declared script', tostring(target))
+  end
+  if words[from] ~= nil then
+    return nil, string.format('passes arguments to "%s" through pnpm, which a script step cannot carry yet', target)
+  end
+  return { script = target }
+end
+
 local ASSIGNMENT = "^([%a_][%w_]*)=(.*)$"
 
 --- The `NAME=value` words a segment starts with, as an env table or nil, and the words after them.
@@ -216,6 +252,10 @@ local function step_of(segment, declared)
   if first == "npm" then
     if env ~= nil then return nil, 'sets environment variables for "npm", which a script step cannot carry' end
     return npm_step(words, declared)
+  end
+  if first == "pnpm" then
+    if env ~= nil then return nil, 'sets environment variables for "pnpm", which a script step cannot carry' end
+    return pnpm_step(words, declared)
   end
   if first == "node" then
     if words[2] == nil then return nil, 'runs "node" with nothing to run' end
