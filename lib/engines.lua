@@ -147,23 +147,25 @@ local function bundled(releases)
   return table.concat(out, ", ")
 end
 
---- The newest pinned node that satisfies an engines.node range and whose bundled
---- npm satisfies an engines.npm range, either range absent meaning any.
+--- Every pinned node, newest first, that satisfies an engines.node range and whose bundled npm
+--- satisfies an engines.npm range, either range absent meaning any.
 ---
---- @return string|nil version, string|nil why, string|nil engine the refused engine's name
-local function newest_satisfying(node_range, npm_range)
+--- @return string[]|nil versions, string|nil why, string|nil engine the refused engine's name
+local function satisfying(node_range, npm_range)
   local node, node_why = constraint_of("node", node_range)
   if node == nil then return nil, node_why, "node" end
   local npm, npm_why = constraint_of("npm", npm_range)
   if npm == nil then return nil, npm_why, "npm" end
   local releases = runtimes.releases()
   local node_matched = false
+  local out = {}
   for _, release in ipairs(releases) do
     if admits(node, release.version) then
       node_matched = true
-      if admits(npm, release.npm) then return release.version end
+      if admits(npm, release.npm) then out[#out + 1] = release.version end
     end
   end
+  if #out > 0 then return out end
   if not node_matched then
     return nil, string.format('no pinned node satisfies the engines.node range "%s": this plugin pins %s',
                               node_range, listed(releases, "version")), "node"
@@ -173,4 +175,11 @@ local function newest_satisfying(node_range, npm_range)
                             bundled(releases)), "npm"
 end
 
-return { newest_satisfying = newest_satisfying }
+--- The newest of `satisfying`, or its refusal.
+local function newest_satisfying(node_range, npm_range)
+  local versions, why, engine = satisfying(node_range, npm_range)
+  if versions == nil then return nil, why, engine end
+  return versions[1]
+end
+
+return { satisfying = satisfying, newest_satisfying = newest_satisfying }

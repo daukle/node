@@ -232,6 +232,39 @@ local FOREIGN_LOCKFILE = "pins this project's dependencies for another package m
 local FOREIGN_LOCKFILE_ROW = "4. Install, lockfile and registry configuration: another package"
                              .. " manager's lockfile (`yarn.lock`, `pnpm-lock.yaml`, `bun.lock`, `bun.lockb`)"
 
+local LOCKFILE_ROW = "4. Install, lockfile and registry configuration: a committed `package-lock.json`"
+
+--- The first npm line that says why `npm ci` refused, for a blocker's text.
+local function npm_refusal(stderr)
+  local lines = {}
+  for line in string.gmatch(stderr or "", "npm error ([^\r\n]+)") do
+    if line ~= "" and string.match(line, "^code ") == nil then lines[#lines + 1] = line end
+    if #lines == 2 then break end
+  end
+  return table.concat(lines, " ")
+end
+
+--- The newest candidate node whose bundled npm accepts the committed lockfile, measured with
+--- `npm ci --dry-run`: npm 11 refuses some lockfiles npm 10 wrote (D-239, ruled 2026-11-06).
+---
+--- @return string|nil version, string|nil why the newest npm's refusal when none accepts it
+local function accepting_version(context, candidates, where, lock_where, env)
+  daukle.write{ path = "migrate-lockcheck/package.json", text = daukle.read(where) }
+  daukle.write{ path = "migrate-lockcheck/package-lock.json", text = daukle.read(lock_where) }
+  local newest_refusal
+  for _, version in ipairs(candidates) do
+    local root, pick = provision(context, version)
+    local check = daukle.exec(root:tool(pick.node), { root:path(pick.npm), "ci", "--dry-run", "--ignore-scripts",
+                                                      "--no-audit", "--no-fund" },
+                              { cwd = derived(context, "migrate-lockcheck"), capture = true, env = env,
+                                check = false })
+    if check.code == 0 then return version end
+    newest_refusal = newest_refusal or string.format("npm %s refuses it: %s", pick.npm_version,
+                                                     npm_refusal(check.stderr))
+  end
+  return nil, newest_refusal
+end
+
 local ROOT_ENTRIES_ROW = "2. Module resolution: a tool that resolves `node_modules` or reads `package.json` itself"
 local ROOT_ENTRIES = {
   { fact = "node_modules", line = "node_modules", name = "node_modules", placed = "as a link to" },
@@ -358,6 +391,18 @@ local function run(context)
   end
   local rc = npmrc_of(context, files)
   translation.config.npmConfig, translation.config.npmrc = rc.config, rc.where
+  if files.exists["package-lock.json"] then
+    local lock_where = within(context.dir, "package-lock.json")
+    local version, refusal = accepting_version(context, translation.candidates, where, lock_where,
+                                               npmrc.env(rc.config))
+    if version == nil then
+      return result(context, translation.config, file_blockers(context, files, {
+        { construct = "package-lock.json", where = lock_where,
+          why = "is refused by the npm of every pinned node that satisfies engines, newest first; "
+                .. refusal, surface = "NPM-SURFACE.md: " .. LOCKFILE_ROW } }), { where })
+    end
+    translation.config.version = version
+  end
   local facts, unresolved = probe(context, translation.config, npmrc.env(rc.config))
   local lock_text = unresolved == nil and lock_of(context, files) or nil
   local blockers
@@ -401,6 +446,10 @@ local function build(context)
   local translation = translate.package(daukle.read(where), where)
   local files = file_facts(context)
   local env = npmrc.env(npmrc_of(context, files).config)
+  if files.exists["package-lock.json"] then
+    translation.config.version = accepting_version(context, translation.candidates, where,
+                                                   within(context.dir, "package-lock.json"), env)
+  end
   local _, unresolved = probe(context, translation.config, env)
   if unresolved ~= nil then error("npm install failed: " .. unresolved, 0) end
   local root, pick = provision(context, translation.config.version)

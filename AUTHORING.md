@@ -255,6 +255,11 @@ one of its rows.
   are compared as bytes. A project with a lockfile fails whenever a range has moved since it was
   written, which is the cost of refusing a committed lockfile. Core prints that the new build
   differs and both digests; it does not list the differing packages, and both trees are on stdout.
+- **A committed `package-lock.json` chooses the node** (`D-239`): of the pinned nodes that satisfy
+  `engines`, newest first, the first whose bundled npm passes `npm ci --dry-run` on the lockfile,
+  in `migrate-lockcheck/`. npm 11 refuses some lockfiles npm 10 wrote (`Missing: fsevents@2.3.3
+  from lock file`, whisper.cpp's `examples/addon.node`). `build` makes the same choice, since it
+  translates again. When no pinned npm accepts the lockfile it is a blocker carrying npm's reason.
 - **A package that declares `"files"`, or a non-private one with a `main` beside scripts, is
   PACKED** (`D-238`, spec `2026-11-06-npm-packing-design.md`). Its `name`, `version`, metadata,
   `main` and `files` go into the `package` key as raw JSON text, and its proof is
