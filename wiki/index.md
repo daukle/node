@@ -199,6 +199,9 @@ toolchain cannot.
 - A command no installed package provides.
 - A dependency on a local path: `file:`, `link:`, or a path such as `./lib`, `../lib`, `/abs` or a
   `.tgz` file, and a `workspace:` or `catalog:` range.
+- A dependency outside the registry: an `npm:` alias, a git repository (`git+`, `github:` and the
+  like), a url, or a GitHub `user/repo` shorthand. Only a registry tarball can be pinned; a
+  dist-tag such as `latest` is a registry range.
 - Dependencies npm cannot install as declared, with no lockfile, under the project `.npmrc`: a version
   that does not exist, or a peer conflict. The blocker carries npm's own error. An install that
   fails for the host's reasons, such as an unreachable registry, is an error, not a blocker.

@@ -20,7 +20,23 @@ local SURFACE = {
   tarball = "3. Dependencies: a tarball URL holding `?`, `%` or `&`",
   local_path = "3. Dependencies: local paths, `file:`",
   workspaces = package_fields.ROWS.workspaces,
+  non_registry = "3. Dependencies: dist-tags, git URLs, `user/repo`, `npm:` aliases",
 }
+
+local GIT_PREFIXES = { "git+", "git:", "github:", "gitlab:", "bitbucket:", "gist:" }
+
+--- What a specifier resolves to outside the registry, or nil for a registry range or dist-tag:
+--- daukle/npm and daukle/pnpm pin only a registry tarball, and raise on anything else.
+local function non_registry_kind(range)
+  local lowered = string.lower(range)
+  if string.sub(lowered, 1, 4) == "npm:" then return "an npm alias" end
+  for _, prefix in ipairs(GIT_PREFIXES) do
+    if string.sub(lowered, 1, #prefix) == prefix then return "a git repository" end
+  end
+  if string.find(lowered, "://", 1, true) then return "a url" end
+  if string.match(range, "^[%w][%w%-%._]*/[%w%-%._]+") then return "a GitHub \"user/repo\" shorthand" end
+  return nil
+end
 
 local WORKSPACE_PROTOCOLS = {
   { prefix = "workspace:", what = "the workspace protocol, which links a sibling package of a workspace" },
@@ -103,6 +119,10 @@ local function dependency_map(package, key, where, blockers)
       blocker(blockers, key .. '."' .. name .. '"', where,
               "is a specifier this toolchain cannot write into its generated package.json",
               SURFACE.tarball)
+    elseif non_registry_kind(range) ~= nil then
+      blocker(blockers, key .. '."' .. name .. '"', where, string.format('is "%s", %s, which'
+              .. ' resolves outside the registry, and only a registry tarball can be pinned',
+              range, non_registry_kind(range)), SURFACE.non_registry)
     else
       out[name] = range
       any = true
