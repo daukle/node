@@ -439,6 +439,8 @@ local function run(context)
   local files = file_facts(context)
   local translation = translate.package(daukle.read(where), where)
   if #translation.blockers > 0 then
+    local _, version_blockers = narrowed_by_version_files(context, files, translation.candidates)
+    for _, refused in ipairs(version_blockers) do translation.blockers[#translation.blockers + 1] = refused end
     return result(context, translation.config, file_blockers(context, files, translation.blockers), { where })
   end
   local rc = npmrc_of(context, files)
