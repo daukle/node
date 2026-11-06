@@ -1,6 +1,7 @@
 local RESOLVER_NAME = "__daukle_resolver__.mjs"
 local BIN_RUNNER_NAME = "__daukle_bin__.mjs"
 local REMOVER_NAME = "__daukle_remove__.mjs"
+local ECHO_NAME = "__daukle_echo__.mjs"
 
 --[[ @implNote three of these four guards return a working module when they are
      wrong, which is why the suite compares every specifier against what node
@@ -197,7 +198,14 @@ const [recursive, force, ...paths] = process.argv.slice(2);
 for (const path of paths) rmSync(path, { recursive: recursive === "1", force: force === "1" });
 ]==]
 
+--- An `echo` step, printed by the provisioned node as sh's echo prints: words joined by a space.
+local ECHO = [==[
+process.stdout.write(process.argv.slice(2).join(" ") + "\n");
+]==]
+
 return {
+  ECHO_NAME = ECHO_NAME,
+  ECHO = ECHO,
   REMOVER_NAME = REMOVER_NAME,
   REMOVER = REMOVER,
   RESOLVER_NAME = RESOLVER_NAME,

@@ -23,7 +23,7 @@ end
 local PLAIN_WORD = "^[%w%-%._/:=@+,%%^~#]+$"
 
 local function word(argument)
-  if type(argument) == "table" then return argument.glob end
+  if type(argument) == "table" then return argument.glob or '"$@"' end
   if string.match(argument, PLAIN_WORD) then return argument end
   return '"' .. argument .. '"'
 end
@@ -48,7 +48,15 @@ local function remove_flag(step)
   return nil
 end
 
+local render_list
+
 local function step_words(step)
+  if step.kind == "attempt" then return { render_list(step.attempt), "||", render_list(step.otherwise) } end
+  if step.kind == "echo" then
+    local words = { "echo" }
+    for _, argument in ipairs(step.args) do words[#words + 1] = word(argument) end
+    return words
+  end
   if step.kind == "remove" then
     local words = { "rm", remove_flag(step) }
     for _, path in ipairs(step.paths) do words[#words + 1] = word(path) end
@@ -74,11 +82,15 @@ local function step_words(step)
 end
 
 --- A script's checked steps as the one command line that parses back to them.
-function published.render(steps)
+function render_list(steps)
   local segments = {}
   for index, step in ipairs(steps) do segments[index] = table.concat(step_words(step), " ") end
   return table.concat(segments, " && ")
 end
+
+--- @implNote a `sh -c` script renders as its body alone, so a packed package declaring one is
+--- blocked by the migrator's comparison rather than published changed.
+published.render = render_list
 
 local function object_of(names, values)
   local parts = {}

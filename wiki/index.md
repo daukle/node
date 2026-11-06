@@ -119,8 +119,12 @@ one of:
 | `{ bin = "<package>", args = [...] }` | the command an installed package publishes |
 | `{ script = "<name>" }` | another script declared here |
 | `{ remove = [...], recursive = true, force = true }` | deletes paths as `rm -rf` would; without `recursive` a directory is refused, without `force` a missing path is |
+| `{ echo = [...] }` | prints its words joined by one space, as `echo` does |
+| `{ attempt = [...], otherwise = [...] }` | runs the `attempt` steps, and the `otherwise` steps only when one of them fails, as `a \|\| b` does |
 
 A `module` or `bin` step also takes `env = { NAME = "value" }`, added to the environment it runs in.
+**An argument may be `{ passed = true }`**, which takes the words the script was called with, as
+`"$@"` does in `sh -c '...' sh`; a script holding one does not also append those words to its last step.
 **An argument may be `{ glob = "<pattern>" }`**, expanded against the package root just before the
 step runs, as POSIX `sh` expands an unquoted glob: `*`, `?` and `[...]` within one directory (`**` is
 `*`), dotfiles only for a pattern starting with `.`, sorted, and the pattern itself when it matches
@@ -242,9 +246,10 @@ A lockfile. The cost is named rather than hidden: without one, what a range reso
 between two runs on different days.
 
 **A shell.** A step names a program and its arguments, never a command line. `daukle migrate`
-translates the common shell syntax into steps instead (`D-227`): `a && b`, `NAME=value cmd`, an
-unquoted glob argument and `rm`. Everything else a shell would do still blocks by name: a pipe, `||`,
-`;`, redirection, `$(...)`, `cd` and the other builtins. For those, a manifest task's
+translates the common shell syntax into steps instead (`D-227`, `D-249`): `a && b`, `a || b`,
+`NAME=value cmd`, an unquoted glob argument, `rm`, `echo` without flags, and `sh -c '<body>' <name>`
+whose body is itself in this subset, each `"$@"` in it taking the passed words. Everything else a
+shell would do still blocks by name: a pipe, `;`, redirection, `$(...)`, `cd` and the other builtins. For those, a manifest task's
 `run = { tool, args }` is the escape hatch.
 
 **`npx`.** It fetches an unpinned package at run time, which is the one thing daukle exists to stop.

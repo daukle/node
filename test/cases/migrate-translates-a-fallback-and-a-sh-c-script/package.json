@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "scripts": {
+    "prepare": "node src/fail.js || echo ''",
+    "format:files": "sh -c 'node src/show.js lint \"$@\" && node src/show.js write \"$@\"' sh",
+    "format:two": "npm run format:files -- a.js b.js"
+  }
+}

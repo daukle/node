@@ -1,0 +1,12 @@
+schema = 1
+project = "daukle/node-test"
+version = "1.0.0"
+
+[modules]
+
+[plugins]
+node = "./plugins/node"
+
+[toolchains.node]
+version = "22.15.0"
+scripts = { inner = [ { module = "src/show.js", args = [ "first", { passed = true } ] }, { module = "src/show.js", args = [ "second", { passed = true } ] } ], outer = { script = "inner", args = [ "a.js", "b.js" ] } }
