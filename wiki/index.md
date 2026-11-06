@@ -177,8 +177,8 @@ toolchain cannot.
 - **A `package.json` below the package root that is a package of its own** (anything more than
   that), as a node instance of its own, `[toolchains.node-<dir>]` with `dir` set, migrated by this
   same migrator from its own directory. Only the outermost is taken, with every file below it.
-  Needs daukle `0.23.0` (api 10). A package declaring `workspaces` hands nothing back: its nested
-  packages are its members, which still block.
+  Needs daukle `0.23.0` (api 10). A workspace root, declared by `workspaces` or a
+  `pnpm-workspace.yaml`, hands nothing back: its nested packages are its members, which still block.
 - `type`, as `type`.
 - `main`, as `entry`, when the project declares no scripts.
 - `scripts` made of `node <file> <args>`, `npm run <name>` (and `npm test`, `start`, `stop`,
@@ -207,7 +207,7 @@ toolchain cannot.
   fails for the host's reasons, such as an unreachable registry, is an error, not a blocker.
 - A `.gitignore` negation that could re-include the `node_modules` or `package.json` that
   `node:install` places at the package root. The report names the negation.
-- A nested `package.json` below a package declaring `workspaces`, in any directory but
+- A nested `package.json` below a workspace root (`workspaces` or `pnpm-workspace.yaml`), in any directory but
   `node_modules`, `.git` and the derived `build/daukle`, and a directory that search cannot list.
   One elsewhere migrates as an instance of its own and blocks only on what it declares.
 - Lifecycle scripts, and a `pre<x>` or `post<x>` beside an `<x>`.
