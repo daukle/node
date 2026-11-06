@@ -52,6 +52,13 @@ resolved and npm reaches no network. A build with ranges and no pins, or ranges 
 resolve, is refused naming the resolve command. `packages` and `devPackages` in `[toolchains.node]`
 were this toolchain's keys up to 3.x and are refused by name since 4.0.0.
 
+**A pnpm project is pinned by `daukle/pnpm` instead**, declared in `[toolchains.pnpm]` with a
+`pnpm` version beside `version`, and resolved with `daukle pnpm:resolve --resolve` into
+`daukle/pnpm/lock.lua`. `node:install` fetches each pinned tarball, serves exactly those on a
+loopback registry and runs the pinned pnpm with `--frozen-lockfile` against it, so the
+`node_modules` is pnpm's own layout and a package left unpinned fails as a 404. One package root
+installs with one package manager: npm's and pnpm's pins together are refused.
+
 A module of yours, run by `node:run` or a script, has the package root as its working directory: the
 directory of the instance (`dir`), or the project root. A relative path in a module means what it
 meant under npm. Only `node:install` and `node:tree` work in the generated directory, and `node:tree`
@@ -156,6 +163,11 @@ toolchain cannot.
   project installs exactly what it did, and from a fresh resolve otherwise. Pinning fetches every
   package once, so a project with dependencies migrates as `daukle migrate --resolve`; without
   the flag the report names it.
+- **A pnpm project**, one committing `pnpm-lock.yaml` with `"packageManager": "pnpm@<version>"`
+  and no `package-lock.json`: the dependencies go to `[toolchains.pnpm]` instead, with `pnpm` the
+  release `packageManager` names (a corepack `+sha512` suffix dropped), pinned from that lockfile.
+  The old project is installed with that pnpm and `--frozen-lockfile` for the proof, and the
+  lockfile moves aside.
 - `engines`, verbatim as `packageFields.engines`, and as `version`: the newest pinned node that
   satisfies `engines.node` and whose bundled npm satisfies `engines.npm`. With neither, the newest
   pinned node.
@@ -167,6 +179,8 @@ toolchain cannot.
 - `scripts` made of `node <file> <args>`, `npm run <name>` (and `npm test`, `start`, `stop`,
   `restart`) of a declared script, and `<command> <args>` where a package at the top of the installed
   `node_modules` provides the command, the one npm's own `.bin` links when two do, joined by `&&`.
+  `pnpm run <name>`, `pnpm test`, `pnpm start` and the `pnpm <name>` shorthand translate as
+  `npm run` does, unless the name is one of pnpm's own commands.
 - Metadata that no build reads: `name`, `version`, `description`, `license`, `author`,
   `contributors`, `keywords`, `repository`, `homepage`, `bugs`, `private`, `funding`.
 - A `package-lock.json` and `node_modules`, which move aside.
@@ -175,7 +189,8 @@ toolchain cannot.
 
 - A shell: a pipe, `||`, `VAR=value`, a glob, a redirect, a line break, a quote that is not a whole
   word, and builtins and keywords such as `cd`, `rm`, `echo`, `exec`, `time`, `exit`, `if`, `for`.
-- `npx`, `pnpm`, `yarn`, `bun`, `deno`, `node` followed by a flag, and any other `npm` verb.
+- `npx`, `yarn`, `bun`, `deno`, `node` followed by a flag, any other `npm` verb, `pnpm dlx`,
+  `pnpm exec`, any other pnpm command, and a pnpm script call that passes arguments.
 - A command no installed package provides.
 - A dependency on a local path: `file:`, `link:`, or a path such as `./lib`, `../lib`, `/abs` or a
   `.tgz` file, and a `workspace:` or `catalog:` range.
@@ -184,26 +199,29 @@ toolchain cannot.
   fails for the host's reasons, such as an unreachable registry, is an error, not a blocker.
 - A `.gitignore` negation that could re-include the `node_modules` or `package.json` that
   `node:install` places at the package root. The report names the negation.
-- A `package.json` below the package root that declares more than `type` and metadata (its own
-  dependencies, scripts, `imports`, `exports` or `main`), in any directory but `node_modules`,
+- A `package.json` below the package root that declares more than `type`, `main`, `module`,
+  `types` and metadata (its own dependencies, scripts, `imports` or `exports`), in any directory but `node_modules`,
   `.git` and the derived `build/daukle`, and a directory that search cannot list.
 - Lifecycle scripts, and a `pre<x>` or `post<x>` beside an `<x>`.
 - `workspaces`, `peerDependencies`, `optionalDependencies`, the project's own `bin`,
-  `exports`, `imports`, `files`, `publishConfig`, `packageManager` and the other fields
+  `exports`, `imports`, `files`, `publishConfig`, a `packageManager` naming anything but pnpm, and the other fields
   `NPM-SURFACE.md` records absent, and a field named with an escape it cannot carry verbatim.
 - An `engines.node` or `engines.npm` range no pinned release satisfies, or one it cannot read, and
   an `engines` that is not a map.
 - An `.npmrc` key `daukle/npm` refuses (a registry, a credential, a `${VAR}` value, a key daukle sets
   itself), an ini section or list, or an `.npmrc` beside a package with no dependencies.
 - An `npm-shrinkwrap.json`, `.nvmrc` or `.node-version`, and another package manager's
-  lockfile: `yarn.lock`, `pnpm-lock.yaml`, `bun.lock` or `bun.lockb`.
+  lockfile: `yarn.lock`, `bun.lock`, `bun.lockb`, or a `pnpm-lock.yaml` without a pnpm
+  `packageManager`. A pnpm `packageManager` with no `pnpm-lock.yaml`, or beside a
+  `package-lock.json`, and a `pnpm-workspace.yaml`.
 
 **The proof compares dependency trees.** The old project is installed as npm would (with `npm ci`
-when it has a lockfile) and its tree written; the new project's `node:tree` must match it byte for
-byte. Because a committed lockfile is refused, a project whose lockfile pins older versions than its
-ranges now resolve to fails the proof: the report says the build differs and gives both digests, and
-both trees are printed so you can compare them. Run `npm update` first to migrate what you would get
-today.
+when it has a lockfile), or as pnpm would for a pnpm project, and its tree written; the new
+project's `node:tree` must match it byte for byte. A pnpm tree lists every entry of pnpm's virtual
+store, so the whole closure is compared and not only the direct dependencies. A `package-lock.json`
+missing a tarball or digest for some entry is re-resolved rather than pinned as committed, and when
+the fresh closure differs from what the lockfile installed the proof fails: the report says the
+build differs and gives both digests, and both trees are printed so you can compare them.
 
 **After migrating, untrack the old `package.json`.** It was almost certainly committed, and git
 applies ignore rules only to untracked files, so the first `node:install` rewrites a tracked file and

@@ -38,15 +38,20 @@ local function for_host(entries, host)
   return out
 end
 
-local function checked_entry(entry, index)
-  for _, field in ipairs({ "path", "url", "sha256", "as" }) do
-    if type(entry[field]) ~= "string" then
-      error(KEY .. ".entries[" .. index .. "] has no " .. field .. ": daukle/npm writes every"
-            .. " entry with one, so daukle/npm/lock.lua was edited; run"
-            .. ' "daukle npm:resolve --resolve" to write it again', 0)
+--- Each pinned entry, refused when a field its resolver always writes is missing. `key` is the pin
+--- key, `npmLock` or `pnpmLock`, whose resolver is the plugin of the same name.
+local function checked_entries(entries, key)
+  local resolver = string.match(key, "^(%l+)Lock$")
+  for index, entry in ipairs(entries) do
+    for _, field in ipairs({ "path", "url", "sha256", "as" }) do
+      if type(entry[field]) ~= "string" then
+        error(key .. ".entries[" .. index .. "] has no " .. field .. ": daukle/" .. resolver .. " writes every"
+              .. " entry with one, so daukle/" .. resolver .. "/lock.lua was edited; run"
+              .. ' "daukle ' .. resolver .. ':resolve --resolve" to write it again', 0)
+      end
     end
   end
-  return entry
+  return entries
 end
 
 --- The `npm_config_*` environment daukle/npm recorded for the resolve, which install must match.
@@ -88,8 +93,7 @@ local function read(config)
     error(KEY .. " is set by daukle/npm's daukle/npm/lock.lua and holds its text and entries;"
           .. ' run "daukle npm:resolve --resolve" to write it again', 0)
   end
-  local entries = {}
-  for index = 1, #lock.entries do entries[index] = checked_entry(lock.entries[index], index) end
+  local entries = checked_entries(lock.entries, KEY)
   if lock.overrides ~= nil and (type(lock.overrides) ~= "string" or string.match(lock.overrides, "^%s*{") == nil) then
     error(KEY .. ".overrides must be npm's override object as JSON text, as daukle/npm writes it;"
           .. ' run "daukle npm:resolve --resolve" to write it again', 0)
@@ -109,4 +113,4 @@ local function read(config)
   }
 end
 
-return { KEY = KEY, read = read, for_host = for_host }
+return { KEY = KEY, read = read, for_host = for_host, checked_entries = checked_entries }

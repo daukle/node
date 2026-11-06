@@ -169,13 +169,20 @@ local function has_any(map)
   return map ~= nil and next(map) ~= nil
 end
 
---- The dependencies, handed to daukle/npm's translator rather than written here: npm's block
---- holds the ranges and its pin file the closure, so node's own block carries neither.
+--- The dependencies, handed to daukle/npm's translator, or daukle/pnpm's for a pnpm project, rather
+--- than written here: that block holds the ranges and its pin file the closure, so node's own block
+--- carries neither.
 local function dependencies_of(config, lock_text)
   local packages, dev_packages, npm_config = config.packages, config.devPackages, config.npmConfig
-  local npmrc_where, overrides = config.npmrc, config.overrides
+  local npmrc_where, overrides, pnpm = config.npmrc, config.overrides, config.pnpm
   config.packages, config.devPackages, config.npmConfig, config.npmrc, config.overrides = nil, nil, nil, nil, nil
+  config.pnpm = nil
   if lock_text == nil or not (has_any(packages) or has_any(dev_packages)) then return {} end
+  if pnpm ~= nil then
+    return { { kind = "dependencies", id = "pnpm",
+               config = { version = config.version, pnpm = pnpm, packages = packages or {},
+                          devPackages = dev_packages or {}, lock = lock_text, overrides = overrides } } }
+  end
   return { { kind = "dependencies", id = "npm",
              config = { version = config.version, packages = packages or {},
                         devPackages = dev_packages or {}, lock = lock_text,
@@ -347,6 +354,8 @@ local REFUSED_FILES = {
   { name = "pnpm-lock.yaml", why = FOREIGN_LOCKFILE, row = FOREIGN_LOCKFILE_ROW },
   { name = "bun.lock", why = FOREIGN_LOCKFILE, row = FOREIGN_LOCKFILE_ROW },
   { name = "bun.lockb", why = FOREIGN_LOCKFILE, row = FOREIGN_LOCKFILE_ROW },
+  { name = "pnpm-workspace.yaml", why = "declares a pnpm workspace, which daukle/pnpm does not install yet",
+    row = package_fields.ROWS.workspaces },
 }
 
 local SKIPPED_DIRECTORIES = { node_modules = true, [".git"] = true }
@@ -382,9 +391,31 @@ local function file_facts(context)
   return facts
 end
 
+local PNPM_LOCK = "pnpm-lock.yaml"
+
+--- Whether the project installs with pnpm: its lockfile committed, its `packageManager` naming
+--- pnpm, and no npm lockfile beside it to say otherwise.
+local function is_pnpm_project(files, config)
+  return config.pnpm ~= nil and files.exists[PNPM_LOCK] == true and not files.exists["package-lock.json"]
+end
+
+--- Why a `packageManager` naming pnpm cannot be handed to daukle/pnpm, or nil when it can.
+local function pnpm_blockers(context, files, config, where)
+  if config.pnpm == nil or is_pnpm_project(files, config) then return {} end
+  local why = files.exists["package-lock.json"]
+              and "names pnpm, and the project also commits a package-lock.json, so which closure it installs is ambiguous"
+              or "names pnpm, and the project commits no pnpm-lock.yaml for daukle/pnpm to pin"
+  return { { construct = '"packageManager"', where = where, why = why,
+             surface = "NPM-SURFACE.md: " .. FOREIGN_LOCKFILE_ROW } }
+end
+
+local function is_refused_file(facts, refused)
+  return facts.exists[refused.name] and not (refused.name == PNPM_LOCK and facts.installs_with_pnpm)
+end
+
 local function file_blockers(context, facts, blockers)
   for _, refused in ipairs(REFUSED_FILES) do
-    if facts.exists[refused.name] then
+    if is_refused_file(facts, refused) then
       blockers[#blockers + 1] = { construct = refused.name, where = within(context.dir, refused.name),
                                   why = refused.why, surface = "NPM-SURFACE.md: " .. refused.row }
     end
@@ -464,6 +495,10 @@ local function run(context)
   local boundaries, boundary_files = take_boundaries(context, files)
   local translation = translate.package(daukle.read(where), where)
   translation.config[nested.KEY] = boundaries
+  files.installs_with_pnpm = is_pnpm_project(files, translation.config)
+  for _, refused in ipairs(pnpm_blockers(context, files, translation.config, where)) do
+    translation.blockers[#translation.blockers + 1] = refused
+  end
   if #translation.blockers > 0 then
     local _, version_blockers = narrowed_by_version_files(context, files, translation.candidates)
     for _, refused in ipairs(version_blockers) do translation.blockers[#translation.blockers + 1] = refused end
@@ -491,6 +526,7 @@ local function run(context)
   end
   local facts, unresolved = probe(context, translation.config, npmrc.env(rc.config))
   local lock_text = unresolved == nil and lock_of(context, files) or nil
+  if files.installs_with_pnpm then lock_text = daukle.read(within(context.dir, PNPM_LOCK)) end
   local blockers
   if unresolved ~= nil then
     blockers = { { construct = "package.json", where = where,
@@ -529,12 +565,28 @@ local function run(context)
   local owned = { where }
   for _, path in ipairs(boundary_files) do owned[#owned + 1] = path end
   if files.exists["package-lock.json"] then owned[#owned + 1] = within(context.dir, "package-lock.json") end
+  if files.installs_with_pnpm then owned[#owned + 1] = within(context.dir, PNPM_LOCK) end
   if files.exists["node_modules"] then owned[#owned + 1] = within(context.dir, "node_modules") end
   if files.exists[npmrc.NAME] then owned[#owned + 1] = rc.where end
   for _, name in ipairs(VERSION_FILES) do
     if files.exists[name] then owned[#owned + 1] = within(context.dir, name) end
   end
   return result(context, translation.config, blockers, owned, lock_text)
+end
+
+--- The old project installed as pnpm installs it, with the release its `packageManager` names.
+---
+--- @implNote pnpm comes from the registry through the provisioned npm, as corepack would fetch it:
+--- the old side is the original tool's own run, which may reach the network as its `npm ci` does.
+local function install_old_with_pnpm(context, root, pick, pnpm, env)
+  daukle.write{ path = "migrate-pnpm/package.json",
+                text = '{ "private": true, "dependencies": { "pnpm": "' .. pnpm .. '" } }\n' }
+  daukle.exec(root:tool(pick.node), { root:path(pick.npm), "install", "--ignore-scripts", "--no-audit", "--no-fund" },
+              { cwd = derived(context, "migrate-pnpm"), env = env })
+  daukle.write{ path = "migrate-old/" .. PNPM_LOCK, text = daukle.read(within(context.dir, PNPM_LOCK)) }
+  daukle.exec(root:tool(pick.node), { "../migrate-pnpm/node_modules/pnpm/bin/pnpm.cjs", "install",
+                                      "--frozen-lockfile", "--ignore-scripts", "--store-dir", "pnpm-store" },
+              { cwd = derived(context, "migrate-old"), env = env })
 end
 
 local function build(context)
@@ -552,13 +604,17 @@ local function build(context)
   if unresolved ~= nil then error("npm install failed: " .. unresolved, 0) end
   local root, pick = provision(context, translation.config.version)
   daukle.write{ path = "migrate-old/package.json", text = daukle.read(where) }
-  local install = { root:path(pick.npm), "install", "--ignore-scripts" }
-  if files.exists["package-lock.json"] then
-    daukle.write{ path = "migrate-old/package-lock.json",
-                  text = daukle.read(within(context.dir, "package-lock.json")) }
-    install = { root:path(pick.npm), "ci", "--ignore-scripts" }
+  if is_pnpm_project(files, translation.config) then
+    install_old_with_pnpm(context, root, pick, translation.config.pnpm, env)
+  else
+    local install = { root:path(pick.npm), "install", "--ignore-scripts" }
+    if files.exists["package-lock.json"] then
+      daukle.write{ path = "migrate-old/package-lock.json",
+                    text = daukle.read(within(context.dir, "package-lock.json")) }
+      install = { root:path(pick.npm), "ci", "--ignore-scripts" }
+    end
+    daukle.exec(root:tool(pick.node), install, { cwd = derived(context, "migrate-old"), env = env })
   end
-  daukle.exec(root:tool(pick.node), install, { cwd = derived(context, "migrate-old"), env = env })
   daukle.write{ path = "migrate-old/" .. tree.SCRIPT_NAME, text = tree.SCRIPT }
   daukle.exec(root:tool(pick.node), { "./" .. tree.SCRIPT_NAME }, { cwd = derived(context, "migrate-old") })
   if translation.config[published.KEY] ~= nil then
