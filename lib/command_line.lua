@@ -3,7 +3,7 @@ local SHELL_WORDS = { cd = true, rm = true, cp = true, mv = true, mkdir = true,
                       set = true, export = true, cat = true, test = true,
                       exec = true, time = true, exit = true, ["true"] = true, ["false"] = true,
                       ["if"] = true, ["then"] = true, ["for"] = true, ["while"] = true,
-                      source = true, ["."] = true }
+                      source = true, ["."] = true, sh = true, bash = true, zsh = true, dash = true }
 local RUNNERS = { npx = true, pnpm = true, yarn = true, bun = true, deno = true }
 local NPM_SCRIPT_VERBS = { test = "test", t = "test", start = "start", stop = "stop",
                            restart = "restart" }
