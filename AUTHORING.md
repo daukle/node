@@ -255,6 +255,18 @@ one of its rows.
   are compared as bytes. A project with a lockfile fails whenever a range has moved since it was
   written, which is the cost of refusing a committed lockfile. Core prints that the new build
   differs and both digests; it does not list the differing packages, and both trees are on stdout.
+- **A node version file narrows the node** (`D-242`): `.nvmrc` and `.node-version` are read with
+  nvm's meaning (`v22` is the newest 22.x, `24.22.1` exactly that) through `lib/engines.lua`'s
+  range reader, intersected with `engines`, and the file is owned. An alias (`lts/*`, `node`) is a
+  blocker by name, and so is a version no pinned node satisfies.
+- **`prepare` runs where npm runs it** (`D-243`): `node:install` runs it after installing, and
+  `node:pack` installs and runs it before staging, so the tarball holds what it builds. The proof's
+  old side then packs a copy of the project (`with-scripts` in `lib/pack.lua`, everything but
+  `.git`, `node_modules` and `build/daukle`) after npm installs it, so npm runs the original
+  `prepare`. Every other lifecycle name stays blocked.
+- **`npm run <name> -- <words>` passes the words on** (`D-244`): the `script` step keeps them as
+  `args`, and `run_steps` appends them to the called script's last step, as npm appends them to its
+  command line. Words after the name without `--` are refused: npm reads them as its own options.
 - **A committed `package-lock.json` chooses the node** (`D-239`): of the pinned nodes that satisfy
   `engines`, newest first, the first whose bundled npm passes `npm ci --dry-run` on the lockfile,
   in `migrate-lockcheck/`. npm 11 refuses some lockfiles npm 10 wrote (`Missing: fsevents@2.3.3

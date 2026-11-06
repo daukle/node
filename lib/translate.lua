@@ -38,7 +38,7 @@ local METADATA = package_fields.METADATA
 local READ = package_fields.READ
 
 local LIFECYCLE = {}
-for _, name in ipairs({ "preinstall", "install", "postinstall", "prepare", "preprepare",
+for _, name in ipairs({ "preinstall", "install", "postinstall", "preprepare",
                         "postprepare", "prepublish", "prepublishOnly", "publish", "postpublish",
                         "prepack", "pack", "postpack", "preversion", "version", "postversion",
                         "dependencies" }) do

@@ -72,22 +72,34 @@ local function rest_of(words, from)
   return out
 end
 
+--- The words after npm's `--`, which npm appends to the called script's command, or nil and why
+--- when words follow the script's name without one: npm would read those as its own options.
+local function passed_arguments(words, from, target)
+  if words[from] == nil then return {} end
+  if words[from] ~= "--" then
+    return nil, string.format('passes "%s" to "%s" without "--", which npm reads as its own option',
+                              tostring(words[from].glob or words[from]), target)
+  end
+  return rest_of(words, from + 1)
+end
+
 local function npm_step(words, declared)
   local verb = words[2]
-  local target
+  local target, from
   if (verb == "run" or verb == "run-script") and words[3] ~= nil then
-    if #words > 3 then return nil, string.format('passes arguments to "%s", and a script step takes'
-                                                  .. ' none', words[3]) end
-    target = words[3]
-  elseif NPM_SCRIPT_VERBS[verb] ~= nil and #words == 2 then
-    target = NPM_SCRIPT_VERBS[verb]
+    target, from = words[3], 4
+  elseif NPM_SCRIPT_VERBS[verb] ~= nil then
+    target, from = NPM_SCRIPT_VERBS[verb], 3
   else
     return nil, string.format('runs "npm %s", which has no daukle equivalent', tostring(verb))
   end
   if not declared[target] then
     return nil, string.format('runs "%s", which is not a declared script', target)
   end
-  return { script = target }
+  local args, why = passed_arguments(words, from, target)
+  if args == nil then return nil, why end
+  if #args == 0 then return { script = target } end
+  return { script = target, args = args }
 end
 
 local ASSIGNMENT = "^([%a_][%w_]*)=(.*)$"
