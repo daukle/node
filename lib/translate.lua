@@ -287,9 +287,9 @@ local function package(text, where)
       carry_field(config, key, raw[key], where, blockers)
     end
   end
-  local version, why, engine = engines.newest_satisfying(engine_ranges(parsed, where, blockers))
-  if version == nil then blocker(blockers, "engines." .. engine, where, why, SURFACE.engines) end
-  config.version = version
+  local candidates, why, engine = engines.satisfying(engine_ranges(parsed, where, blockers))
+  if candidates == nil then blocker(blockers, "engines." .. engine, where, why, SURFACE.engines) end
+  config.version = candidates and candidates[1]
   config.packages = dependency_map(parsed, "dependencies", where, blockers)
   config.devPackages = dependency_map(parsed, "devDependencies", where, blockers)
   if parsed.type ~= nil then
@@ -308,7 +308,8 @@ local function package(text, where)
       if step.command ~= nil then commands[step.command] = true end
     end
   end
-  return { config = config, blockers = blockers, commands = commands, original_scripts = parsed.scripts }
+  return { config = config, blockers = blockers, commands = commands, original_scripts = parsed.scripts,
+           candidates = candidates or {} }
 end
 
 --[[ @implNote the bin runner looks "binName or the package name" up in a map
