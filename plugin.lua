@@ -62,6 +62,18 @@ local function cache_pinned_tarballs(node, npm, lock, host)
   end
 end
 
+--- The offline `npm ci` command line for `lock`.
+---
+--- @implNote a lockfile whose peer conflict npm only warned about makes `npm ci` fetch the
+--- conflicting package's packument to warn again, which an offline cache of tarballs never
+--- holds (ENOTCACHED, see D-235). Ignoring peer edges skips that fetch and installs the same
+--- bytes, but prunes every package placed only as a peer, so it is passed only when there is none.
+local function offline_ci(npm, lock)
+  local argv = { npm, "ci", "--offline", "--cache", NPM_CACHE, "--no-audit", "--no-fund" }
+  if lock.peer_free then argv[#argv + 1] = "--legacy-peer-deps" end
+  return argv
+end
+
 --- Installs exactly the pinned closure, with npm reaching no network: every tarball this host
 --- installs is fetched by daukle against its sha256 and handed to npm's cache, which npm keys
 --- by the lockfile's integrity, so a tarball missing from it fails ENOTCACHED naming it.
@@ -73,8 +85,7 @@ local function install_packages(context, spec)
     return root, pick
   end
   cache_pinned_tarballs(node, npm, spec.lock, context.host)
-  daukle.exec(node, { npm, "ci", "--offline", "--cache", NPM_CACHE, "--no-audit", "--no-fund" },
-              { env = spec.lock.env })
+  daukle.exec(node, offline_ci(npm, spec.lock), { env = spec.lock.env })
   return root, pick
 end
 
