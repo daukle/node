@@ -141,6 +141,8 @@ toolchain cannot.
 
 - A project `.npmrc`, as `npmConfig` in `[toolchains.npm]`, which every npm daukle runs reads as
   `npm_config_*`; the file moves aside.
+- `overrides`, as its JSON text in `[toolchains.npm]`, which the resolve and every install read.
+  An `overrides` beside no dependency blocks, since it would have nowhere to go.
 - `dependencies` and `devDependencies`, as `packages` and `devPackages` in `[toolchains.npm]`,
   pinned from the project's own `package-lock.json` when it is version 2 or later, so the migrated
   project installs exactly what it did, and from a fresh resolve otherwise. Pinning fetches every
@@ -175,7 +177,7 @@ toolchain cannot.
 - A `package.json` below the package root, in any directory but `node_modules`, `.git` and the
   derived `build/daukle`, and a directory that search cannot list.
 - Lifecycle scripts, and a `pre<x>` or `post<x>` beside an `<x>`.
-- `workspaces`, `overrides`, `peerDependencies`, `optionalDependencies`, the project's own `bin`,
+- `workspaces`, `peerDependencies`, `optionalDependencies`, the project's own `bin`,
   `exports`, `imports`, `files`, `publishConfig`, `packageManager` and the other fields
   `NPM-SURFACE.md` records absent, and a field named with an escape it cannot carry verbatim.
 - An `engines.node` or `engines.npm` range no pinned release satisfies, or one it cannot read, and

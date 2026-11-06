@@ -19,7 +19,6 @@ package_fields.ABSENT = {
   optionalDependencies = "3. Dependencies: `optionalDependencies`",
   bundleDependencies = "3. Dependencies: `bundleDependencies`",
   bundledDependencies = "3. Dependencies: `bundleDependencies`",
-  overrides = "3. Dependencies: `overrides`",
   workspaces = package_fields.ROWS.workspaces,
   bin = "7. Packing and publishing: the project's own `bin`",
   exports = package_fields.ROWS.main,
@@ -31,12 +30,12 @@ package_fields.ABSENT = {
   packageManager = package_fields.ROWS.shell,
 }
 
---- Fields the migrator reads into keys of their own.
+--- Fields the migrator reads into keys of their own; `overrides` into daukle/npm's block (D-246).
 ---
 --- @implNote `engines` is absent on purpose: it is read for `version` AND carried,
 --- because what a package supports is not which node daukle runs (`AUTHORING.md`).
 package_fields.READ = { dependencies = true, devDependencies = true, type = true,
-                        main = true, scripts = true, files = true }
+                        main = true, scripts = true, files = true, overrides = true }
 
 --- Fields describing the package, which the generated file deliberately leaves out.
 package_fields.METADATA = { name = true, version = true, description = true, license = true, author = true,

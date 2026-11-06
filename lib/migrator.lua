@@ -170,13 +170,14 @@ end
 --- holds the ranges and its pin file the closure, so node's own block carries neither.
 local function dependencies_of(config, lock_text)
   local packages, dev_packages, npm_config = config.packages, config.devPackages, config.npmConfig
-  local npmrc_where = config.npmrc
-  config.packages, config.devPackages, config.npmConfig, config.npmrc = nil, nil, nil, nil
+  local npmrc_where, overrides = config.npmrc, config.overrides
+  config.packages, config.devPackages, config.npmConfig, config.npmrc, config.overrides = nil, nil, nil, nil, nil
   if lock_text == nil or not (has_any(packages) or has_any(dev_packages)) then return {} end
   return { { kind = "dependencies", id = "npm",
              config = { version = config.version, packages = packages or {},
                         devPackages = dev_packages or {}, lock = lock_text,
-                        npmConfig = has_any(npm_config) and npm_config or nil, npmrc = npmrc_where } } }
+                        npmConfig = has_any(npm_config) and npm_config or nil, npmrc = npmrc_where,
+                        overrides = overrides } } }
 end
 
 local function result(context, config, blockers, owned, lock_text)
@@ -199,7 +200,8 @@ local function probe(context, config, env)
   local root, pick = provision(context, config.version)
   daukle.write{ path = "migrate-probe/package.json", text = '{' .. PROBE_IDENTITY
                 .. ', "private": true, "dependencies": ' .. json_object(config.packages)
-                .. ', "devDependencies": ' .. json_object(config.devPackages) .. '}\n' }
+                .. ', "devDependencies": ' .. json_object(config.devPackages)
+                .. (config.overrides == nil and "" or (', "overrides": ' .. config.overrides)) .. '}\n' }
   daukle.write{ path = "migrate-probe/" .. PROBE_NAME, text = PROBE }
   local install = daukle.exec(root:tool(pick.node), { root:path(pick.npm), "install",
                                                       "--ignore-scripts", "--include=dev" },
@@ -493,6 +495,12 @@ local function run(context)
                                 why = "configures npm, and this package declares no dependencies for npm to"
                                       .. " resolve or install, so its keys would have nowhere to go",
                                 surface = "NPM-SURFACE.md: 4. Install, lockfile and registry configuration: a project `.npmrc`" }
+  end
+  if translation.config.overrides ~= nil and not has_dependencies(translation.config) then
+    blockers[#blockers + 1] = { construct = '"overrides"', where = where,
+                                why = "overrides packages, and this package declares no dependencies for npm to"
+                                      .. " resolve, so the overrides would have nowhere to go",
+                                surface = "NPM-SURFACE.md: " .. translate.SURFACE.overrides }
   end
   local owned = { where }
   if files.exists["package-lock.json"] then owned[#owned + 1] = within(context.dir, "package-lock.json") end

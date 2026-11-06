@@ -79,7 +79,7 @@ local function places_no_peer_only_package(packages)
 end
 
 --- The pins set on `config`, or nil when there are none. Returns `{ text, entries, packages,
---- package_ranges, dev_packages, dev_ranges, peer_free }`, the ranges read from the lockfile's
+--- package_ranges, dev_packages, dev_ranges, peer_free, overrides }`, the ranges read from the lockfile's
 --- root entry, so the package.json npm checks the lockfile against is the one it was resolved from.
 local function read(config)
   local lock = config[KEY]
@@ -90,6 +90,10 @@ local function read(config)
   end
   local entries = {}
   for index = 1, #lock.entries do entries[index] = checked_entry(lock.entries[index], index) end
+  if lock.overrides ~= nil and (type(lock.overrides) ~= "string" or string.match(lock.overrides, "^%s*{") == nil) then
+    error(KEY .. ".overrides must be npm's override object as JSON text, as daukle/npm writes it;"
+          .. ' run "daukle npm:resolve --resolve" to write it again', 0)
+  end
   local packages = daukle.json_parse(lock.text).packages or {}
   local root = packages[""] or {}
   return {
@@ -101,6 +105,7 @@ local function read(config)
     package_ranges = root.dependencies or {},
     dev_packages = sorted_names(root.devDependencies),
     dev_ranges = root.devDependencies or {},
+    overrides = lock.overrides,
   }
 end
 
