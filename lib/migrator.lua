@@ -3,6 +3,7 @@ local translate = daukle.require("lib/translate")
 local tree = daukle.require("lib/tree")
 local paths = daukle.require("lib/paths")
 local npm_errors = daukle.require("lib/npm_errors")
+local npmrc = daukle.require("lib/npmrc")
 
 local PROBE_NAME = "__daukle_probe__.mjs"
 
@@ -74,9 +75,7 @@ try {
 } catch (error) {
   for (const entry of ROOT_ENTRIES) reincludedBy[entry.fact] = { unreadable: String(error.message ?? error) };
 }
-const own = JSON.parse(readFileSync(join(here, "package.json"), "utf8"));
-const direct = new Set(Object.keys({ ...own.dependencies, ...own.devDependencies }));
-/** @implNote every package at the top of node_modules, scoped ones included: npm links each one's bins into node_modules/.bin, so a script runs a transitive package's command too. */
+/** @implNote every package at the top of node_modules, scoped ones included, in npm's own order: arborist links bins sorted by depth then by localeCompare of the path, and the first package to claim a command keeps it (`#linkAllBins`, bin-links' `seen`), so a direct dependency has no priority over a transitive one. */
 function topLevelPackages() {
   const names = [];
   let entries;
@@ -86,10 +85,9 @@ function topLevelPackages() {
     if (!entry.startsWith("@")) { names.push(entry); continue; }
     for (const scoped of readdirSync(join(here, "node_modules", entry))) names.push(entry + "/" + scoped);
   }
-  return names;
+  return names.sort((left, right) => ("node_modules/" + left).localeCompare("node_modules/" + right, "en"));
 }
 const bins = {};
-const transitiveBins = {};
 for (const name of topLevelPackages()) {
   let manifest;
   try { manifest = JSON.parse(readFileSync(join(here, "node_modules", name, "package.json"), "utf8")); }
@@ -98,10 +96,8 @@ for (const name of topLevelPackages()) {
   const commands = typeof manifest.bin === "string"
     ? [name.replace(/^@[^/]+\//, "")]
     : Object.keys(map ? manifest.bin : {});
-  const into = direct.has(name) ? bins : transitiveBins;
-  for (const command of commands) (into[command] ??= []).push({ name, map });
+  for (const command of commands) bins[command] ??= [{ name, map }];
 }
-for (const [command, providers] of Object.entries(transitiveBins)) bins[command] ??= providers;
 process.stdout.write(JSON.stringify({ bins, reincludedBy }));
 ]==]
 
@@ -147,12 +143,14 @@ end
 --- The dependencies, handed to daukle/npm's translator rather than written here: npm's block
 --- holds the ranges and its pin file the closure, so node's own block carries neither.
 local function dependencies_of(config, lock_text)
-  local packages, dev_packages = config.packages, config.devPackages
-  config.packages, config.devPackages = nil, nil
+  local packages, dev_packages, npm_config = config.packages, config.devPackages, config.npmConfig
+  local npmrc_where = config.npmrc
+  config.packages, config.devPackages, config.npmConfig, config.npmrc = nil, nil, nil, nil
   if lock_text == nil or not (has_any(packages) or has_any(dev_packages)) then return {} end
   return { { kind = "dependencies", id = "npm",
              config = { version = config.version, packages = packages or {},
-                        devPackages = dev_packages or {}, lock = lock_text } } }
+                        devPackages = dev_packages or {}, lock = lock_text,
+                        npmConfig = has_any(npm_config) and npm_config or nil, npmrc = npmrc_where } } }
 end
 
 local function result(context, config, blockers, owned, lock_text)
@@ -171,7 +169,7 @@ local PROBE_IDENTITY ='"name": "daukle-migrate-probe", "version": "0.0.0"'
 --[[ @implNote the probe script still runs after a failed install, because the
      ignore facts need no node_modules and the report should carry them beside
      the install failure. ]]
-local function probe(context, config)
+local function probe(context, config, env)
   local root, pick = provision(context, config.version)
   daukle.write{ path = "migrate-probe/package.json", text = '{' .. PROBE_IDENTITY
                 .. ', "private": true, "dependencies": ' .. json_object(config.packages)
@@ -179,7 +177,7 @@ local function probe(context, config)
   daukle.write{ path = "migrate-probe/" .. PROBE_NAME, text = PROBE }
   local install = daukle.exec(root:tool(pick.node), { root:path(pick.npm), "install",
                                                       "--ignore-scripts", "--include=dev" },
-                              { cwd = derived(context, "migrate-probe"), capture = true,
+                              { cwd = derived(context, "migrate-probe"), capture = true, env = env,
                                 check = false })
   local unresolved = nil
   if install.code ~= 0 then
@@ -228,8 +226,6 @@ end
 local REFUSED_FILES = {
   { name = "npm-shrinkwrap.json", why = NPM_CONFIGURATION,
     row = "4. Install, lockfile and registry configuration: a committed `package-lock.json` or `npm-shrinkwrap.json`" },
-  { name = ".npmrc", why = NPM_CONFIGURATION,
-    row = "4. Install, lockfile and registry configuration: a project `.npmrc`: scoped registries, `_authToken`, `${VAR}`" },
   { name = ".nvmrc", why = VERSION_MANAGER, row = "1. The runtime" },
   { name = ".node-version", why = VERSION_MANAGER, row = "1. The runtime" },
   { name = "yarn.lock", why = FOREIGN_LOCKFILE, row = FOREIGN_LOCKFILE_ROW },
@@ -315,6 +311,19 @@ local function lock_of(context, files)
   return daukle.read(derived(context, "migrate-probe/package-lock.json"))
 end
 
+--- The `.npmrc` beside the package.json, read, or an empty one when there is none.
+local function npmrc_of(context, files)
+  local where = within(context.dir, npmrc.NAME)
+  if not files.exists[npmrc.NAME] then return { config = {}, blockers = {}, where = where } end
+  local parsed = npmrc.read(daukle.read(where), where)
+  parsed.where = where
+  return parsed
+end
+
+local function has_dependencies(config)
+  return has_any(config.packages) or has_any(config.devPackages)
+end
+
 local function run(context)
   local where = within(context.dir, "package.json")
   local files = file_facts(context)
@@ -322,7 +331,9 @@ local function run(context)
   if #translation.blockers > 0 then
     return result(context, translation.config, file_blockers(context, files, translation.blockers), { where })
   end
-  local facts, unresolved = probe(context, translation.config)
+  local rc = npmrc_of(context, files)
+  translation.config.npmConfig, translation.config.npmrc = rc.config, rc.where
+  local facts, unresolved = probe(context, translation.config, npmrc.env(rc.config))
   local lock_text = unresolved == nil and lock_of(context, files) or nil
   local blockers
   if unresolved ~= nil then
@@ -343,18 +354,27 @@ local function run(context)
                                   surface = "NPM-SURFACE.md: " .. ROOT_ENTRIES_ROW }
     end
   end
+  for _, refused in ipairs(rc.blockers) do blockers[#blockers + 1] = refused end
+  if has_any(rc.config) and not has_dependencies(translation.config) then
+    blockers[#blockers + 1] = { construct = npmrc.NAME, where = rc.where,
+                                why = "configures npm, and this package declares no dependencies for npm to"
+                                      .. " resolve or install, so its keys would have nowhere to go",
+                                surface = "NPM-SURFACE.md: 4. Install, lockfile and registry configuration: a project `.npmrc`" }
+  end
   local owned = { where }
   if files.exists["package-lock.json"] then owned[#owned + 1] = within(context.dir, "package-lock.json") end
   if files.exists["node_modules"] then owned[#owned + 1] = within(context.dir, "node_modules") end
+  if files.exists[npmrc.NAME] then owned[#owned + 1] = rc.where end
   return result(context, translation.config, blockers, owned, lock_text)
 end
 
 local function build(context)
   local where = within(context.dir, "package.json")
   local translation = translate.package(daukle.read(where), where)
-  local _, unresolved = probe(context, translation.config)
-  if unresolved ~= nil then error("npm install failed: " .. unresolved, 0) end
   local files = file_facts(context)
+  local env = npmrc.env(npmrc_of(context, files).config)
+  local _, unresolved = probe(context, translation.config, env)
+  if unresolved ~= nil then error("npm install failed: " .. unresolved, 0) end
   local root, pick = provision(context, translation.config.version)
   daukle.write{ path = "migrate-old/package.json", text = daukle.read(where) }
   local install = { root:path(pick.npm), "install", "--ignore-scripts" }
@@ -363,7 +383,7 @@ local function build(context)
                   text = daukle.read(within(context.dir, "package-lock.json")) }
     install = { root:path(pick.npm), "ci", "--ignore-scripts" }
   end
-  daukle.exec(root:tool(pick.node), install, { cwd = derived(context, "migrate-old") })
+  daukle.exec(root:tool(pick.node), install, { cwd = derived(context, "migrate-old"), env = env })
   daukle.write{ path = "migrate-old/" .. tree.SCRIPT_NAME, text = tree.SCRIPT }
   daukle.exec(root:tool(pick.node), { "./" .. tree.SCRIPT_NAME }, { cwd = derived(context, "migrate-old") })
 end

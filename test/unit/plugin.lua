@@ -7,8 +7,9 @@ local SUITES = {
   command_line_test = daukle.require("tests/command_line_test"),
   translate_test = daukle.require("tests/translate_test"),
   npm_errors_test = daukle.require("tests/npm_errors_test"),
+  npmrc_test = daukle.require("tests/npmrc_test"),
 }
-local SUITE_ORDER = { "engines_test", "command_line_test", "translate_test", "npm_errors_test" }
+local SUITE_ORDER = { "engines_test", "command_line_test", "translate_test", "npm_errors_test", "npmrc_test" }
 
 daukle.task{
   name = "unit:test",

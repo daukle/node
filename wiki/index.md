@@ -139,6 +139,8 @@ toolchain cannot.
 
 **What migrates**
 
+- A project `.npmrc`, as `npmConfig` in `[toolchains.npm]`, which every npm daukle runs reads as
+  `npm_config_*`; the file moves aside.
 - `dependencies` and `devDependencies`, as `packages` and `devPackages` in `[toolchains.npm]`,
   pinned from the project's own `package-lock.json` when it is version 2 or later, so the migrated
   project installs exactly what it did, and from a fresh resolve otherwise. Pinning fetches every
@@ -151,9 +153,8 @@ toolchain cannot.
 - `type`, as `type`.
 - `main`, as `entry`, when the project declares no scripts.
 - `scripts` made of `node <file> <args>`, `npm run <name>` (and `npm test`, `start`, `stop`,
-  `restart`) of a declared script, and `<command> <args>` where exactly one direct dependency
-  provides the command, or none does and exactly one package at the top of the installed
-  `node_modules` does, as npm's own `.bin` would run it, joined by `&&`.
+  `restart`) of a declared script, and `<command> <args>` where a package at the top of the installed
+  `node_modules` provides the command, the one npm's own `.bin` links when two do, joined by `&&`.
 - Metadata that no build reads: `name`, `version`, `description`, `license`, `author`,
   `contributors`, `keywords`, `repository`, `homepage`, `bugs`, `private`, `funding`.
 - A `package-lock.json` and `node_modules`, which move aside.
@@ -163,10 +164,10 @@ toolchain cannot.
 - A shell: a pipe, `||`, `VAR=value`, a glob, a redirect, a line break, a quote that is not a whole
   word, and builtins and keywords such as `cd`, `rm`, `echo`, `exec`, `time`, `exit`, `if`, `for`.
 - `npx`, `pnpm`, `yarn`, `bun`, `deno`, `node` followed by a flag, and any other `npm` verb.
-- A command no installed package provides, or two of the same rank do.
+- A command no installed package provides.
 - A dependency on a local path: `file:`, `link:`, or a path such as `./lib`, `../lib`, `/abs` or a
   `.tgz` file, and a `workspace:` or `catalog:` range.
-- Dependencies npm cannot install as declared, with no lockfile and no project `.npmrc`: a version
+- Dependencies npm cannot install as declared, with no lockfile, under the project `.npmrc`: a version
   that does not exist, or a peer conflict. The blocker carries npm's own error. An install that
   fails for the host's reasons, such as an unreachable registry, is an error, not a blocker.
 - A `.gitignore` negation that could re-include the `node_modules` or `package.json` that
@@ -179,7 +180,9 @@ toolchain cannot.
   `NPM-SURFACE.md` records absent, and a field named with an escape it cannot carry verbatim.
 - An `engines.node` or `engines.npm` range no pinned release satisfies, or one it cannot read, and
   an `engines` that is not a map.
-- An `npm-shrinkwrap.json`, `.npmrc`, `.nvmrc` or `.node-version`, and another package manager's
+- An `.npmrc` key `daukle/npm` refuses (a registry, a credential, a `${VAR}` value, a key daukle sets
+  itself), an ini section or list, or an `.npmrc` beside a package with no dependencies.
+- An `npm-shrinkwrap.json`, `.nvmrc` or `.node-version`, and another package manager's
   lockfile: `yarn.lock`, `pnpm-lock.yaml`, `bun.lock` or `bun.lockb`.
 
 **The proof compares dependency trees.** The old project is installed as npm would (with `npm ci`
