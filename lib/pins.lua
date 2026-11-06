@@ -69,9 +69,18 @@ local function sorted_names(map)
   return names
 end
 
+--- Whether no package of the lockfile is installed only to satisfy a peer, which npm marks
+--- `peer: true`. Only then can an install ignore peer edges without pruning a package.
+local function places_no_peer_only_package(packages)
+  for _, entry in pairs(packages or {}) do
+    if type(entry) == "table" and entry.peer == true then return false end
+  end
+  return true
+end
+
 --- The pins set on `config`, or nil when there are none. Returns `{ text, entries, packages,
---- package_ranges, dev_packages, dev_ranges }`, the ranges read from the lockfile's root entry,
---- so the package.json npm checks the lockfile against is the one it was resolved from.
+--- package_ranges, dev_packages, dev_ranges, peer_free }`, the ranges read from the lockfile's
+--- root entry, so the package.json npm checks the lockfile against is the one it was resolved from.
 local function read(config)
   local lock = config[KEY]
   if lock == nil then return nil end
@@ -81,8 +90,10 @@ local function read(config)
   end
   local entries = {}
   for index = 1, #lock.entries do entries[index] = checked_entry(lock.entries[index], index) end
-  local root = (daukle.json_parse(lock.text).packages or {})[""] or {}
+  local packages = daukle.json_parse(lock.text).packages or {}
+  local root = packages[""] or {}
   return {
+    peer_free = places_no_peer_only_package(packages),
     text = lock.text,
     entries = entries,
     env = checked_env(lock.env),
