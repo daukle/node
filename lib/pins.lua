@@ -49,6 +49,19 @@ local function checked_entry(entry, index)
   return entry
 end
 
+--- The `npm_config_*` environment daukle/npm recorded for the resolve, which install must match.
+local function checked_env(env)
+  if env == nil then return {} end
+  if type(env) ~= "table" then error(KEY .. ".env must be a table: run \"daukle npm:resolve --resolve\"", 0) end
+  for name, value in pairs(env) do
+    if type(name) ~= "string" or string.sub(name, 1, 11) ~= "npm_config_" or type(value) ~= "string" then
+      error(KEY .. ".env holds " .. tostring(name) .. ", which daukle/npm never writes, so"
+            .. ' daukle/npm/lock.lua was edited; run "daukle npm:resolve --resolve" to write it again', 0)
+    end
+  end
+  return env
+end
+
 local function sorted_names(map)
   local names = {}
   for name in pairs(map or {}) do names[#names + 1] = name end
@@ -72,6 +85,7 @@ local function read(config)
   return {
     text = lock.text,
     entries = entries,
+    env = checked_env(lock.env),
     packages = sorted_names(root.dependencies),
     package_ranges = root.dependencies or {},
     dev_packages = sorted_names(root.devDependencies),

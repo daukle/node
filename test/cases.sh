@@ -41,10 +41,10 @@ fail() {
 # than the single plugin.lua the other repositories copy.
 # A fixture's .gitignore would apply to this repository too, hiding the case's
 # own files from git, so a case carries it as "gitignore" and the sandbox
-# gives it back its dot.
+# gives it back its dot; an "npmrc" likewise, which would configure npm here.
 restore_ignore_files() {
-  find "$1" -type f -name gitignore | while IFS= read -r file; do
-    mv "$file" "$(dirname "$file")/.gitignore"
+  find "$1" -type f \( -name gitignore -o -name npmrc \) | while IFS= read -r file; do
+    mv "$file" "$(dirname "$file")/.$(basename "$file")"
   done
 }
 
@@ -81,8 +81,8 @@ server.serve_forever()
 # packs it and served from 127.0.0.1.
 # daukle/npm translates a migrated project's dependencies into pins, so the
 # catalog names its release beside the staged node plugin.
-NPM_PLUGIN_URL=https://github.com/daukle/npm/releases/download/2.1.0/plugin.lua
-NPM_PLUGIN_SHA256=12d18faf6b72cffc6da76afe678d231ee7820229f63fd466206021dd89a2d5f6
+NPM_PLUGIN_URL=https://github.com/daukle/npm/releases/download/2.2.0/plugin.lua
+NPM_PLUGIN_SHA256=dea37c3cfb06353733e9b8905097f4106d711821d01c468a8a50495a6d30c216
 
 serve_plugin() {
   [ -n "${catalog:-}" ] && return 0
