@@ -1,0 +1,22 @@
+schema = 1
+project = "daukle/node-test"
+version = "1.0.0"
+
+[modules]
+
+[plugins]
+node = "./plugins/node"
+
+[toolchains.node]
+version = "22.15.0"
+entry = "lib/index.js"
+
+[toolchains.node.nestedPackages."lib/compat"]
+main = "../index.js"
+packageFields = { name = '"demo-compat"', private = "true" }
+
+[toolchains.node.package]
+name = '"demo-shim-pack"'
+version = '"1.0.0"'
+main = '"lib/index.js"'
+files = '["lib"]'

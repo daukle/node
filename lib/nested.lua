@@ -1,6 +1,8 @@
---- `nestedPackages`: a `package.json` below the package root that only marks a module format
---- boundary, said in daukle.toml and placed by node:install as a marked copy (D-247).
+--- `nestedPackages`: a `package.json` below the package root that marks a module format boundary
+--- (D-247) or is a subpath shim of `main`, `module` and `types` (D-248), said in daukle.toml and
+--- placed by node:install as a marked copy.
 local links = daukle.require("lib/links")
+local package_fields = daukle.require("lib/package_fields")
 
 local nested = {}
 
@@ -10,6 +12,14 @@ nested.KEY = "nestedPackages"
 nested.PLACEMENTS_NAME = links.NESTED_NAME
 
 local TYPES = { module = true, commonjs = true }
+
+--- The entry points a shim declares, in the order a placement writes them.
+local ENTRY_FIELDS = { "main", "module", "types" }
+
+local IS_ENTRY_FIELD = { main = true, module = true, types = true }
+
+--- The metadata a placement carries as JSON text, so a packed copy equals the original by value.
+local FIELDS_KEY = package_fields.KEY
 
 local SEGMENT = "^[%w%._%-@+]+$"
 
@@ -31,6 +41,44 @@ local function directory_problem(directory)
   return nil
 end
 
+local function is_entry_path(value)
+  return type(value) == "string" and value ~= "" and not string.find(value, "[%c\\]")
+end
+
+local function checked_metadata(label, fields)
+  if type(fields) ~= "table" or #fields > 0 then
+    error(label .. "." .. FIELDS_KEY .. " must be a table of field name to its JSON text", 0)
+  end
+  local names = {}
+  for name, text in pairs(fields) do
+    if not package_fields.METADATA[name] then
+      error(label .. "." .. FIELDS_KEY .. ' names "' .. tostring(name)
+            .. '": a placed package.json carries only metadata such as "name" there', 0)
+    end
+    if type(text) ~= "string" or not package_fields.is_json_value(text) then
+      error(label .. "." .. FIELDS_KEY .. "." .. name .. " must be one JSON value as text, such as '\"shim\"'", 0)
+    end
+    names[#names + 1] = name
+  end
+  table.sort(names)
+  return names
+end
+
+local function check_field(label, field, value)
+  if field == "type" then
+    if not TYPES[value] then
+      error(label .. '.type is "module" or "commonjs", as in package.json, not "' .. tostring(value) .. '"', 0)
+    end
+  elseif IS_ENTRY_FIELD[field] then
+    if not is_entry_path(value) then
+      error(label .. "." .. field .. " must be a file path written with \"/\", as in package.json", 0)
+    end
+  elseif field ~= FIELDS_KEY then
+    error(label .. ' declares "' .. tostring(field) .. '": a placed package.json carries only "type", '
+          .. '"main", "module", "types" and ' .. FIELDS_KEY, 0)
+  end
+end
+
 local function checked_entry(directory, entry)
   local label = '"' .. nested.KEY .. "." .. tostring(directory) .. '"'
   local problem = directory_problem(directory)
@@ -38,15 +86,10 @@ local function checked_entry(directory, entry)
   if type(entry) ~= "table" or #entry > 0 then
     error(label .. ' must be a table of the fields its package.json declares, such as { type = "commonjs" }', 0)
   end
-  for field, value in pairs(entry) do
-    if field ~= "type" then
-      error(label .. ' declares "' .. tostring(field) .. '": a placed package.json carries only "type"', 0)
-    end
-    if not TYPES[value] then
-      error(label .. '.type is "module" or "commonjs", as in package.json, not "' .. tostring(value) .. '"', 0)
-    end
-  end
-  return { directory = directory, type = entry.type }
+  for field, value in pairs(entry) do check_field(label, field, value) end
+  local metadata = entry[FIELDS_KEY] or {}
+  return { directory = directory, type = entry.type, main = entry.main, module = entry.module,
+           types = entry.types, metadata = metadata, metadata_names = checked_metadata(label, metadata) }
 end
 
 --- The checked placements, sorted by directory: `{ directory, type }`, `type` possibly nil.
@@ -62,13 +105,20 @@ function nested.read(config)
   return out
 end
 
-local function package_json(placement)
-  local type_line = placement.type == nil and "" or (',\n  "type": "' .. placement.type .. '"')
-  return '{\n  "' .. links.MARKER_KEY .. '": "' .. links.MARKER_TEXT .. '"' .. type_line .. '\n}\n'
-end
-
 local function json_string(text)
   return '"' .. string.gsub(text, '[\\"\n]', { ["\\"] = "\\\\", ['"'] = '\\"', ["\n"] = "\\n" }) .. '"'
+end
+
+local function package_json(placement)
+  local members = { json_string(links.MARKER_KEY) .. ": " .. json_string(links.MARKER_TEXT) }
+  if placement.type ~= nil then members[#members + 1] = '"type": ' .. json_string(placement.type) end
+  for _, field in ipairs(ENTRY_FIELDS) do
+    if placement[field] ~= nil then members[#members + 1] = json_string(field) .. ": " .. json_string(placement[field]) end
+  end
+  for _, name in ipairs(placement.metadata_names) do
+    members[#members + 1] = json_string(name) .. ": " .. placement.metadata[name]
+  end
+  return "{\n  " .. table.concat(members, ",\n  ") .. "\n}\n"
 end
 
 --- The placements file: always written, so a placement removed from daukle.toml is pruned.
@@ -83,21 +133,28 @@ end
 
 local BOM = "\239\187\191"
 
---- The entry a nested package.json translates to, or nil when it declares more than a format
---- boundary: only `type`, beside metadata node reads for nothing when there is no `exports`.
-function nested.boundary_of(text, metadata)
+--- The entry a nested package.json translates to, or nil when it is a package of its own: only
+--- `type`, `main`, `module` and `types`, beside metadata carried as its JSON text.
+function nested.boundary_of(text)
   if string.sub(text, 1, 3) == BOM then text = string.sub(text, 4) end
   if string.match(text, "^%s*{") == nil then return nil end
   local parsed = daukle.json_parse(text)
-  local entry = {}
+  local raw = package_fields.raw_members(text)
+  local entry, metadata = {}, {}
   for field, value in pairs(parsed) do
     if field == "type" then
       if not TYPES[value] then return nil end
       entry.type = value
-    elseif not metadata[field] then
+    elseif IS_ENTRY_FIELD[field] then
+      if not is_entry_path(value) then return nil end
+      entry[field] = value
+    elseif package_fields.METADATA[field] and raw[field] ~= nil then
+      metadata[field] = raw[field]
+    else
       return nil
     end
   end
+  if next(metadata) ~= nil then entry[FIELDS_KEY] = metadata end
   return entry
 end
 
