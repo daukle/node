@@ -1,5 +1,5 @@
-scripts/package.json
-tools/package.json
-build/out/package.json
-.github/x/package.json
-2. Module resolution: a nested `package.json` below the package root
+scripts/package.json: "imports"
+tools/package.json: "imports"
+build/out/package.json: "imports"
+.github/x/package.json: "imports"
+the project's own `"imports"`
