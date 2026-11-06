@@ -16,6 +16,7 @@ local pins = daukle.require("lib/pins")
 local npm_launcher = daukle.require("lib/npm_launcher")
 local pack = daukle.require("lib/pack")
 local published = daukle.require("lib/published")
+local nested = daukle.require("lib/nested")
 
 daukle.toolchain{
   name = "node",
@@ -30,6 +31,7 @@ daukle.toolchain{
       [tree.SCRIPT_NAME] = tree.SCRIPT,
       [links.SCRIPT_NAME] = links.SCRIPT,
       [npm_launcher.SCRIPT_NAME] = npm_launcher.SCRIPT,
+      [nested.PLACEMENTS_NAME] = nested.placements_json(spec.nested),
     }
     if spec.lock ~= nil then files["package-lock.json"] = spec.lock.text end
     if spec.published ~= nil then

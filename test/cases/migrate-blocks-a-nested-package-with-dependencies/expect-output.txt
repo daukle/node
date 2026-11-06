@@ -1,0 +1,2 @@
+tools/package.json
+a package.json below the package root

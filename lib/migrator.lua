@@ -8,6 +8,8 @@ local npmrc = daukle.require("lib/npmrc")
 local pack = daukle.require("lib/pack")
 local published = daukle.require("lib/published")
 local scripts = daukle.require("lib/scripts")
+local nested = daukle.require("lib/nested")
+local package_fields = daukle.require("lib/package_fields")
 
 local PROBE_NAME = "__daukle_probe__.mjs"
 
@@ -436,10 +438,31 @@ local function has_dependencies(config)
   return has_any(config.packages) or has_any(config.devPackages)
 end
 
+--- Takes the nested package.json files that only mark a format boundary out of `facts.nested`,
+--- returning them as `nestedPackages` entries and the paths the migration moves aside.
+local function take_boundaries(context, facts)
+  local entries, paths_taken, kept = {}, {}, {}
+  for _, path in ipairs(facts.nested) do
+    local directory = string.sub(path, 1, #path - #"/package.json")
+    local entry = nested.directory_problem(directory) == nil
+                  and nested.boundary_of(daukle.read(within(context.dir, path)), package_fields.METADATA)
+    if entry then
+      entries[directory] = entry
+      paths_taken[#paths_taken + 1] = within(context.dir, path)
+    else
+      kept[#kept + 1] = path
+    end
+  end
+  facts.nested = kept
+  return next(entries) ~= nil and entries or nil, paths_taken
+end
+
 local function run(context)
   local where = within(context.dir, "package.json")
   local files = file_facts(context)
+  local boundaries, boundary_files = take_boundaries(context, files)
   local translation = translate.package(daukle.read(where), where)
+  translation.config[nested.KEY] = boundaries
   if #translation.blockers > 0 then
     local _, version_blockers = narrowed_by_version_files(context, files, translation.candidates)
     for _, refused in ipairs(version_blockers) do translation.blockers[#translation.blockers + 1] = refused end
@@ -503,6 +526,7 @@ local function run(context)
                                 surface = "NPM-SURFACE.md: " .. translate.SURFACE.overrides }
   end
   local owned = { where }
+  for _, path in ipairs(boundary_files) do owned[#owned + 1] = path end
   if files.exists["package-lock.json"] then owned[#owned + 1] = within(context.dir, "package-lock.json") end
   if files.exists["node_modules"] then owned[#owned + 1] = within(context.dir, "node_modules") end
   if files.exists[npmrc.NAME] then owned[#owned + 1] = rc.where end
