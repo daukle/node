@@ -225,7 +225,7 @@ what npm can do that this toolchain cannot is `daukle/docs` `NPM-SURFACE.md`; ev
 one of its rows.
 
 - **`run` first lists the package with `daukle.list`** (core `0.11.0`): which of
-  `package-lock.json`, `npm-shrinkwrap.json`, `node_modules`, `.npmrc`, `.nvmrc`, `.node-version`,
+  `package-lock.json`, `npm-shrinkwrap.json`, `node_modules`, `.npmrc` (read by `lib/npmrc.lua`, `D-232`), `.nvmrc`, `.node-version`,
   `yarn.lock`, `pnpm-lock.yaml`, `bun.lock` and `bun.lockb` exist, and every `package.json` below the
   root, skipping `node_modules`, `.git`, `build/daukle` and every link. These need no node, so they
   are reported even when translating `package.json` already blocked, and a project learns every
@@ -233,8 +233,9 @@ one of its rows.
   only once translation passes.
 - **`run` then reads `package.json` with `daukle.read` and installs its dependencies into
   `migrate-probe/`** with `--ignore-scripts`, to learn which package provides each command a script
-  runs: a direct dependency first, else any package npm placed at the top of `node_modules`, whose
-  bins npm links into `.bin` too (`D-233`). Two providers at the same rank block. The install's output is captured, so `daukle migrate` is silent while it runs. It runs
+  runs: any package npm placed at the top of `node_modules`, in npm's own order, which links bins
+  sorted by path (`localeCompare`, `#linkAllBins` in `@npmcli/arborist`) and lets the first claim
+  win, so a direct dependency has no priority and two providers never tie (`D-233`). The install's output is captured, so `daukle migrate` is silent while it runs. It runs
   with `check = false`, and `lib/npm_errors.lua` reads npm's `npm error code` line: a resolution
   code (`ETARGET`, `E404`, `ERESOLVE`, `EUNSUPPORTEDPROTOCOL`, `EINVALIDTAGNAME`, `E401`, `E403`)
   is one blocker carrying npm's lines and its log path, beside the file blockers, with only the

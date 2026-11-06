@@ -1,0 +1,2 @@
+# peers of react-dom 17 want react 17
+legacy-peer-deps = true
