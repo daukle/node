@@ -501,8 +501,8 @@ end
 --- relative to the project, for core to migrate as instances of their own (core api 10, D-248).
 --- Only the outermost is taken, with every file below it, since its own migration reads the rest.
 ---
---- @implNote nothing is taken below a package declaring `workspaces`: its nested packages are its
---- members, which still block as the workspaces row does.
+--- @implNote nothing is taken below a workspace root, whether `workspaces` or a `pnpm-workspace.yaml`
+--- declares it: its nested packages are its members, which still block as the workspaces row does.
 local function take_instances(context, facts, declares_workspaces)
   if declares_workspaces then return {} end
   local instances, relative = {}, {}
@@ -526,7 +526,9 @@ local function take_instances(context, facts, declares_workspaces)
   return instances
 end
 
-local function declares_workspaces(text)
+local function declares_workspaces(context, files)
+  if files.exists["pnpm-workspace.yaml"] then return true end
+  local text = daukle.read(within(context.dir, "package.json"))
   if type(text) == "string" and string.sub(text, 1, 3) == "\239\187\191" then text = string.sub(text, 4) end
   if string.match(text or "", "^%s*{") == nil then return false end
   return daukle.json_parse(text).workspaces ~= nil
@@ -618,8 +620,7 @@ end
 
 local function run(context)
   local files = file_facts(context)
-  local instances = take_instances(context, files,
-                                   declares_workspaces(daukle.read(within(context.dir, "package.json"))))
+  local instances = take_instances(context, files, declares_workspaces(context, files))
   local answer = run_package(context, files)
   answer.instances = instances
   return answer
