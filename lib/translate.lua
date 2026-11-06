@@ -7,6 +7,7 @@ local published = daukle.require("lib/published")
 
 local SURFACE = {
   dependencies = "3. Dependencies",
+  overrides = "3. Dependencies: `overrides`",
   scripts = "5. Scripts",
   shell = package_fields.ROWS.shell,
   prepost = "5. Scripts: `pre<name>` and `post<name>` run automatically",
@@ -268,6 +269,17 @@ local function published_fields(parsed, raw, where, blockers)
   return out
 end
 
+--- The `overrides` object as its raw JSON text, which daukle/npm resolves with verbatim.
+local function overrides_of(parsed, raw, where, blockers)
+  if parsed.overrides == nil then return nil end
+  if type(parsed.overrides) ~= "table" or string.match(raw.overrides or "", "^{") == nil then
+    blocker(blockers, '"overrides"', where, "is not an object, and npm reads only an object of"
+            .. " package name to override", SURFACE.overrides)
+    return nil
+  end
+  return raw.overrides
+end
+
 local function package(text, where)
   local blockers = {}
   if type(text) == "string" and string.sub(text, 1, 3) == BOM then text = string.sub(text, 4) end
@@ -290,6 +302,7 @@ local function package(text, where)
   local candidates, why, engine = engines.satisfying(engine_ranges(parsed, where, blockers))
   if candidates == nil then blocker(blockers, "engines." .. engine, where, why, SURFACE.engines) end
   config.version = candidates and candidates[1]
+  config.overrides = overrides_of(parsed, raw, where, blockers)
   config.packages = dependency_map(parsed, "dependencies", where, blockers)
   config.devPackages = dependency_map(parsed, "devDependencies", where, blockers)
   if parsed.type ~= nil then

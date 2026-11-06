@@ -138,6 +138,13 @@ local function carried_fields(names, values)
   return text
 end
 
+--- @implNote an offline `npm ci` checks each lockfile edge against the package.json beside it,
+--- so an edge the pinned overrides changed asks the registry unless the overrides are here too.
+local function overrides_field(text)
+  if text == nil then return "" end
+  return ',\n  "overrides": ' .. text
+end
+
 local function package_json(spec)
   local type_line = spec.type == nil and "" or ('  "type": "' .. spec.type .. '",\n')
   return '{\n'
@@ -146,6 +153,7 @@ local function package_json(spec)
     .. '  "private": true,\n'
     .. '  "dependencies": ' .. json_object(spec.packages, spec.package_ranges, "  ") .. ',\n'
     .. '  "devDependencies": ' .. json_object(spec.dev_packages, spec.dev_ranges, "  ")
+    .. overrides_field(spec.overrides)
     .. carried_fields(spec.field_names, spec.fields) .. '\n'
     .. '}\n'
 end
@@ -193,6 +201,7 @@ local function read(context)
     package_ranges = pinned.package_ranges,
     dev_packages = pinned.dev_packages,
     dev_ranges = pinned.dev_ranges,
+    overrides = pinned.overrides,
     lock = pinned.text ~= nil and pinned or nil,
     published = published_of(config),
   }
