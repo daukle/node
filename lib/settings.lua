@@ -4,9 +4,11 @@ local links = daukle.require("lib/links")
 local package_fields = daukle.require("lib/package_fields")
 local pins = daukle.require("lib/pins")
 local published = daukle.require("lib/published")
+local nested = daukle.require("lib/nested")
 
 local KNOWN_KEYS = { version = true, entry = true, scripts = true, type = true,
-                     [package_fields.KEY] = true, [pins.KEY] = true, [published.KEY] = true }
+                     [package_fields.KEY] = true, [pins.KEY] = true, [published.KEY] = true,
+                     [nested.KEY] = true }
 
 local MOVED_TO_NPM = { packages = true, devPackages = true }
 
@@ -204,6 +206,7 @@ local function read(context)
     overrides = pinned.overrides,
     lock = pinned.text ~= nil and pinned or nil,
     published = published_of(config),
+    nested = nested.read(config),
   }
 end
 

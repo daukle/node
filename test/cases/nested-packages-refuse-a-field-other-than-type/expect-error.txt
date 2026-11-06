@@ -1,0 +1,1 @@
+a placed package.json carries only "type"
