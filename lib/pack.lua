@@ -47,6 +47,10 @@ function pack(directory, destination, scripts = false) {
 
 const NOT_COPIED = new Set([".git", "node_modules"]);
 
+/** The root entries daukle itself writes, which configure the build and are not the package's
+ *  content: a migrated package packs what it packed before migrating. */
+const DAUKLE_ROOT_ENTRIES = new Set(["daukle.toml", "daukle.lua", "daukle", "daukle.ps1"]);
+
 /** Copies a project's files, skipping what npm never packs from and daukle's own build directory,
  *  which holds the destination: Node's cpSync refuses a copy into its own subdirectory. */
 function copyTree(source, target, path) {
@@ -134,7 +138,7 @@ async function stage(root, manifestPath, stageDirectory, destination) {
   const files = await packlist(tree, { path: root });
   rmSync(stageDirectory, { recursive: true, force: true });
   for (const file of files) {
-    if (file === "package.json") continue;
+    if (file === "package.json" || DAUKLE_ROOT_ENTRIES.has(file.split("/")[0])) continue;
     mkdirSync(dirname(join(stageDirectory, file)), { recursive: true });
     copyFileSync(join(root, file), join(stageDirectory, file));
   }
