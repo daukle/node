@@ -15,19 +15,48 @@ local NO_ROOT_MANIFEST = 3
 local SCRIPT = [==[
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { gunzipSync } from "node:zlib";
 
 const [mode, npmCli, ...rest] = process.argv.slice(2);
 
-function pack(directory, destination) {
-  const result = spawnSync(process.execPath, [npmCli, "pack", "--ignore-scripts", "--json",
-    "--pack-destination", destination, "--cache", join(destination, "npm-cache-pack")],
-    { cwd: directory, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] });
-  if (result.status !== 0) throw new Error(`npm pack exited with code ${result.status}`);
-  return join(destination, JSON.parse(result.stdout)[0].filename);
+function npm(directory, destination, args, capture) {
+  const result = spawnSync(process.execPath, [npmCli, ...args, "--cache", join(destination, "npm-cache-pack")],
+    { cwd: directory, encoding: "utf8", stdio: ["ignore", capture ? "pipe" : "inherit", "inherit"],
+      env: { ...process.env, PATH: dirname(process.execPath) + delimiter + (process.env.PATH ?? "") } });
+  if (result.status !== 0) throw new Error(`npm ${args[0]} exited with code ${result.status}`);
+  return result.stdout;
+}
+
+function pack(directory, destination, scripts = false) {
+  const flags = scripts ? [] : ["--ignore-scripts"];
+  const stdout = npm(directory, destination, ["pack", ...flags, "--json", "--pack-destination", destination], true);
+  return join(destination, JSON.parse(stdout)[0].filename);
+}
+
+const NOT_COPIED = new Set([".git", "node_modules"]);
+
+/** Copies a project's files, skipping what npm never packs from and daukle's own build directory,
+ *  which holds the destination: Node's cpSync refuses a copy into its own subdirectory. */
+function copyTree(source, target, path) {
+  mkdirSync(target, { recursive: true });
+  for (const entry of readdirSync(source, { withFileTypes: true })) {
+    const child = path === "" ? entry.name : `${path}/${entry.name}`;
+    if (NOT_COPIED.has(entry.name) || child === "build/daukle") continue;
+    if (entry.isDirectory()) copyTree(join(source, entry.name), join(target, entry.name), child);
+    else if (entry.isFile()) copyFileSync(join(source, entry.name), join(target, entry.name));
+  }
+}
+
+/** The original project as npm would pack it with its scripts: a copy, installed, then packed. */
+function packWithScripts(directory, destination) {
+  const copy = join(destination, "project");
+  rmSync(copy, { recursive: true, force: true });
+  copyTree(directory, copy, "");
+  npm(copy, destination, [existsSync(join(copy, "package-lock.json")) ? "ci" : "install", "--no-audit", "--no-fund"], false);
+  return pack(copy, destination, true);
 }
 
 function canonical(value) {
@@ -110,6 +139,9 @@ if (mode === "stage") {
 } else if (mode === "in-place") {
   const [directory, destination] = rest.map((path) => resolve(path));
   listing(pack(directory, destination), destination);
+} else if (mode === "with-scripts") {
+  const [directory, destination] = rest.map((path) => resolve(path));
+  listing(packWithScripts(directory, destination), destination);
 } else {
   throw new Error(`unknown mode ${mode}`);
 }

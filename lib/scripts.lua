@@ -126,8 +126,8 @@ local function checked_step(step, where)
   if type(step[kind]) ~= "string" or step[kind] == "" then
     error(string.format('%s has a "%s" that is not a name', where, kind), 0)
   end
-  if kind == "script" and (step.args ~= nil or step.binName ~= nil or step.env ~= nil) then
-    error(string.format('%s runs another script, which takes no arguments of its own', where), 0)
+  if kind == "script" and (step.binName ~= nil or step.env ~= nil) then
+    error(string.format('%s runs another script, which takes arguments but no "binName" or "env"', where), 0)
   end
   if kind ~= "bin" and step.binName ~= nil then
     error(string.format('%s has a "binName" without a "bin"', where), 0)
