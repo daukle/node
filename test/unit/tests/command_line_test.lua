@@ -56,6 +56,7 @@ return {
   refuses("eslint . | tee out", "shell"),
   steps("a || b", { { command = "a", args = {} }, { command = "b", args = {} } }),
   refuses("a |& b", "shell"),
+  refuses("bash scripts/dev.sh", 'needs a shell, which this toolchain refuses by design: "bash"'),
   refuses("a & b", "shell"),
   steps("echo '' done", { { echo = { "", "done" } } }),
   refuses("cd web && npm run build", "shell"),
