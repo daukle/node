@@ -83,6 +83,8 @@ server.serve_forever()
 # catalog names its release beside the staged node plugin.
 NPM_PLUGIN_URL=https://github.com/daukle/npm/releases/download/2.3.1/plugin.lua
 NPM_PLUGIN_SHA256=c22b1f97d292863a6c3988853d4db324a9abc505fd0b1f6f853fdf0f804a9351
+PNPM_PLUGIN_URL=https://github.com/daukle/pnpm/releases/download/1.0.1/plugin.lua
+PNPM_PLUGIN_SHA256=1e6fc751ff2a247b0272a01ed8fdf0f942e3bc56607a70de9ddbf1d55d65ce50
 
 serve_plugin() {
   [ -n "${catalog:-}" ] && return 0
@@ -119,8 +121,9 @@ serve_plugin() {
   fi
   server_broken=
   catalog="$work/catalog.json"
-  "$python" -c 'import json,sys; c=json.load(open(sys.argv[1])); c.update(id="node", asset={"url":sys.argv[2],"sha256":sys.argv[3]}); n={"id":"npm","asset":{"url":sys.argv[5],"sha256":sys.argv[6]},"replaces":{"npm":{"dependencies":["npm"]}}}; json.dump({"plugins":[c,n]}, open(sys.argv[4],"w"))' \
-    "$root/catalog.json" "http://127.0.0.1:$port/plugin.lua" "$digest" "$catalog" "$NPM_PLUGIN_URL" "$NPM_PLUGIN_SHA256"
+  "$python" -c 'import json,sys; c=json.load(open(sys.argv[1])); c.update(id="node", asset={"url":sys.argv[2],"sha256":sys.argv[3]}); n={"id":"npm","asset":{"url":sys.argv[5],"sha256":sys.argv[6]},"replaces":{"npm":{"dependencies":["npm"]}}}; p={"id":"pnpm","asset":{"url":sys.argv[7],"sha256":sys.argv[8]},"replaces":{"npm":{"dependencies":["pnpm"]}}}; json.dump({"plugins":[c,n,p]}, open(sys.argv[4],"w"))' \
+    "$root/catalog.json" "http://127.0.0.1:$port/plugin.lua" "$digest" "$catalog" "$NPM_PLUGIN_URL" "$NPM_PLUGIN_SHA256" \
+    "$PNPM_PLUGIN_URL" "$PNPM_PLUGIN_SHA256"
 }
 
 grep_clauses_in() {
