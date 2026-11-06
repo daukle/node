@@ -1,0 +1,1 @@
+{"private":true,"scripts":{"show":"node show.js base","both":"npm run show -- one two"}}

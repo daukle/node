@@ -59,6 +59,8 @@ local function step_words(step)
     words[#words + 1] = "npm"
     words[#words + 1] = "run"
     words[#words + 1] = step.name
+    if #step.args > 0 then words[#words + 1] = "--" end
+    for _, argument in ipairs(step.args) do words[#words + 1] = word(argument) end
     return words
   end
   if step.kind == "module" then

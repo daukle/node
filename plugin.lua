@@ -214,29 +214,39 @@ daukle.task{
   end,
 }
 
-local function run_steps(context, spec, script)
+local function joined(first, second)
+  local out = {}
+  for _, item in ipairs(first) do out[#out + 1] = item end
+  for _, item in ipairs(second) do out[#out + 1] = item end
+  return out
+end
+
+--- Runs a script's steps, `appended` going to the end of the last one, which is where npm puts the
+--- words after `npm run <name> --`: it appends them to the script's command line (D-244).
+local function run_steps(context, spec, script, appended)
   for index = 1, #script.steps do
     local step = script.steps[index]
+    local extra = index == #script.steps and (appended or {}) or {}
     if step.kind == "script" then
       -- read() has already refused a reference to no script and a cycle, so a
       -- second check here would be a second place for the rule to disagree.
       for other = 1, #spec.scripts do
         if spec.scripts[other].name == step.name then
-          run_steps(context, spec, spec.scripts[other])
+          run_steps(context, spec, spec.scripts[other], joined(step.args, extra))
         end
       end
     elseif step.kind == "module" then
       local root, pick = provision_node(context, spec)
-      run_module(context, root, pick, step.name, expanded(context, step.args), step.env)
+      run_module(context, root, pick, step.name, expanded(context, joined(step.args, extra)), step.env)
     elseif step.kind == "remove" then
       local root, pick = provision_node(context, spec)
       local argv = { step.recursive and "1" or "0", step.force and "1" or "0" }
-      for _, path in ipairs(expanded(context, step.paths)) do argv[#argv + 1] = path end
+      for _, path in ipairs(expanded(context, joined(step.paths, extra))) do argv[#argv + 1] = path end
       run_module(context, root, pick, derived_from_package_root(context) .. "/" .. runners.REMOVER_NAME, argv)
     else
       local root, pick = provision_node(context, spec)
       local argv = { step.name, step.binName or "" }
-      for _, argument in ipairs(expanded(context, step.args)) do argv[#argv + 1] = argument end
+      for _, argument in ipairs(expanded(context, joined(step.args, extra))) do argv[#argv + 1] = argument end
       run_module(context, root, pick, derived_from_package_root(context) .. "/" .. runners.BIN_RUNNER_NAME, argv,
                  step.env)
     end
