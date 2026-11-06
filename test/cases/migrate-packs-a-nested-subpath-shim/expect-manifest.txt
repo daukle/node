@@ -1,0 +1,5 @@
+[toolchains.node.nestedPackages."lib/compat"]
+main = "../index.js"
+types = "../index.d.ts"
+name = "\"demo-shim-pack-compat\""
+private = "true"

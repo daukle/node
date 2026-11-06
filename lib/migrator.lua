@@ -446,7 +446,7 @@ local function take_boundaries(context, facts)
   for _, path in ipairs(facts.nested) do
     local directory = string.sub(path, 1, #path - #"/package.json")
     local entry = nested.directory_problem(directory) == nil
-                  and nested.boundary_of(daukle.read(within(context.dir, path)), package_fields.METADATA)
+                  and nested.boundary_of(daukle.read(within(context.dir, path)))
     if entry then
       entries[directory] = entry
       paths_taken[#paths_taken + 1] = within(context.dir, path)

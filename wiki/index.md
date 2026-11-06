@@ -28,7 +28,7 @@ package, sorted, to `build/daukle/node/dependency-tree.txt` and to the terminal.
 | `scripts` | a script per task, below |
 | `type` | `"module"` or `"commonjs"`: the module system of your own `.js` files, as `type` in a `package.json`. Unset forces nothing. A nested `package.json` below the package root decides for the files under it, as in node, where one with no `type` means CommonJS. `daukle migrate` still blocks such a file, because its resolution fields are not carried, searching every directory but `node_modules`, `.git` and `build/daukle` |
 | `packageFields` | fields of a `package.json` this toolchain does not model, such as `browserslist`, `lint-staged` or `sideEffects`, each as its own JSON text: `browserslist = '["> 1%"]'`. Written verbatim into the generated `package.json`, which `node:install` places at the package root, so a tool that reads `package.json` itself finds them; npm ignores a field it does not know. A field this toolchain writes or models, or one it has no equivalent for, is refused, and so is text that is not exactly one JSON value. `daukle migrate` writes it for every field it does not know |
-| `nestedPackages` | a `package.json` below the package root that marks a module format boundary, by directory: `nestedPackages = { "src/legacy" = { type = "commonjs" } }`, or `{}` for one without a `type`. `node:install` places each as a marked copy, as it places the root one, refuses one it did not place or one that was edited, and removes one `daukle.toml` no longer names. `type` is the only field it carries |
+| `nestedPackages` | a `package.json` below the package root that marks a module format boundary or is a subpath shim, by directory: `nestedPackages = { "src/legacy" = { type = "commonjs" } }`, `{ main = "../dist/compat.js", types = "../dist/compat.d.ts" }`, or `{}` for one with neither. It carries `type`, `main`, `module` and `types`, plus metadata such as `name` as `packageFields`, each field's JSON text as in the root's. `node:install` places each as a marked copy, as it places the root one, refuses one it did not place or one that was edited, and removes one `daukle.toml` no longer names. `node:pack` packs it without the marker, so a published shim ships the file it declares |
 
 ## Dependencies
 
@@ -73,7 +73,7 @@ Where a link is refused (`EPERM`, `ENOTSUP`, `EOPNOTSUPP` or `EINVAL`), or `DAUK
 it. The bytes placed as `package.json` are kept in `build/daukle/<instance>/__daukle_placed__.json`,
 which is how an old copy is told from an edited one.
 
-Each `nestedPackages` directory gets the same treatment: a marked copy holding its `type`, its
+Each `nestedPackages` directory gets the same treatment: a marked copy holding its fields, its
 bytes kept in `__daukle_placed_nested__.json`, and an `info/exclude` line.
 
 **Nothing to add to `.gitignore`.** Inside a git repository, `node:install` writes both entries
@@ -160,8 +160,8 @@ toolchain cannot.
   satisfies `engines.node` and whose bundled npm satisfies `engines.npm`. With neither, the newest
   pinned node.
 - Every other field it does not know, verbatim as `packageFields`.
-- A `package.json` below the package root that declares only `type` and metadata such as `name`,
-  as `nestedPackages`; the file moves aside and `node:install` places a generated one.
+- A `package.json` below the package root that declares only `type`, `main`, `module`, `types`
+  and metadata such as `name`, as `nestedPackages`; the file moves aside and `node:install` places a generated one.
 - `type`, as `type`.
 - `main`, as `entry`, when the project declares no scripts.
 - `scripts` made of `node <file> <args>`, `npm run <name>` (and `npm test`, `start`, `stop`,
