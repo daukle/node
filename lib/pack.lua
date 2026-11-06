@@ -30,11 +30,19 @@ function npm(directory, destination, args, capture) {
   return result.stdout;
 }
 
+function tarballs(destination) {
+  return new Set(readdirSync(destination).filter((name) => name.endsWith(".tgz")));
+}
+
+/** Packs and returns the tarball that appeared, rather than parsing npm's output: a script's own
+ *  output shares stdout and may end without a newline, as husky's ".git can't be found" does. */
 function pack(directory, destination, scripts = false) {
   const flags = scripts ? [] : ["--ignore-scripts"];
-  const stdout = npm(directory, destination, ["pack", ...flags, "--json", "--pack-destination", destination], true);
-  const json = stdout.startsWith("[") ? stdout : stdout.slice(stdout.lastIndexOf("\n[") + 1);
-  return join(destination, JSON.parse(json)[0].filename);
+  for (const name of tarballs(destination)) rmSync(join(destination, name));
+  npm(directory, destination, ["pack", ...flags, "--pack-destination", destination], false);
+  const made = [...tarballs(destination)];
+  if (made.length !== 1) throw new Error(`npm pack left ${made.length} tarballs in ${destination}`);
+  return join(destination, made[0]);
 }
 
 const NOT_COPIED = new Set([".git", "node_modules"]);
