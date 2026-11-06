@@ -132,6 +132,20 @@ grep_clauses_in() {
   done < "$clauses"
 }
 
+# PATH with every directory that holds a node removed, so a script that finds
+# its node through PATH can only find the one daukle provisioned.
+path_without_node() {
+  kept=
+  old_ifs=$IFS
+  IFS=:
+  for directory in $PATH; do
+    [ -e "$directory/node" ] || [ -e "$directory/node.exe" ] && continue
+    kept=${kept:+$kept:}$directory
+  done
+  IFS=$old_ifs
+  printf '%s' "$kept"
+}
+
 run_migrate_case() {
   serve_plugin || return 1
   status=0
@@ -181,7 +195,9 @@ run_migrate_case() {
   fi
   if [ -f "$case_dir/task-after.txt" ]; then
     task=$(cat "$case_dir/task-after.txt")
-    (cd "$sandbox" && "$daukle" "$task" >stdout.txt 2>stderr.txt) || { fail "$label" "$task failed after migrating"; sed -n '1,40p' "$sandbox/stderr.txt" >&2; return 1; }
+    task_path=$PATH
+    [ -f "$case_dir/task-without-node-on-path" ] && task_path=$(path_without_node)
+    (cd "$sandbox" && PATH=$task_path "$daukle" "$task" >stdout.txt 2>stderr.txt) || { fail "$label" "$task failed after migrating"; sed -n '1,40p' "$sandbox/stderr.txt" >&2; return 1; }
     cat "$sandbox/stdout.txt" "$sandbox/stderr.txt" > "$sandbox/both.txt"
     grep_clauses_in "$sandbox/both.txt" "$case_dir/expect-task-output.txt" || return 1
   fi
@@ -448,7 +464,7 @@ run_case() {
     restore_ignore_files "$sandbox"
     # Its own repository, or node:install would write this repository's info/exclude.
     git init -q "$sandbox"
-    (cd "$sandbox" && rm -f migrate needs-node without-resolve expect-*.txt task-after.txt env.txt)
+    (cd "$sandbox" && rm -f migrate needs-node without-resolve expect-*.txt task-after.txt env.txt task-without-node-on-path)
     run_migrate_case && passed=$((passed + 1))
     return 0
   fi
