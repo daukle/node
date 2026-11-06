@@ -1,5 +1,6 @@
 local runtimes = daukle.require("lib/runtimes")
 local translate = daukle.require("lib/translate")
+local engines = daukle.require("lib/engines")
 local tree = daukle.require("lib/tree")
 local paths = daukle.require("lib/paths")
 local npm_errors = daukle.require("lib/npm_errors")
@@ -218,8 +219,61 @@ local function probe(context, config, env)
 end
 
 local NPM_CONFIGURATION = "configures npm in a way this toolchain does not carry over"
-local VERSION_MANAGER = "names a node version for a version manager, which this toolchain never"
-                        .. " reads beside the version it writes"
+local VERSION_FILES = { ".nvmrc", ".node-version" }
+local VERSION_FILE_ROW = "1. The runtime: a node version file (`.nvmrc`, `.node-version`)"
+
+local function first_line(text)
+  for line in string.gmatch(text or "", "[^\r\n]+") do
+    local trimmed = string.match(line, "^%s*(.-)%s*$")
+    if trimmed ~= "" and string.sub(trimmed, 1, 1) ~= "#" then return trimmed end
+  end
+  return nil
+end
+
+local function pinned_versions()
+  local out = {}
+  for index, release in ipairs(runtimes.releases()) do out[index] = release.version end
+  return table.concat(out, ", ")
+end
+
+local function contains(list, value)
+  for _, item in ipairs(list) do if item == value then return true end end
+  return false
+end
+
+--- The candidates narrowed by each node version file, read with nvm's meaning: a partial version
+--- is the newest matching release and an exact one is exact; an alias is a blocker (D-242).
+local function narrowed_by_version_files(context, files, candidates)
+  local blockers = {}
+  for _, name in ipairs(VERSION_FILES) do
+    if files.exists[name] then
+      local where = within(context.dir, name)
+      local text = first_line(daukle.read(where))
+      local version = text and string.match(text, "^[vV]?(%d+[%.%d]*)$")
+      if version == nil or string.match(version, "^%d+%.?%d*%.?%d*$") == nil then
+        blockers[#blockers + 1] = { construct = name, where = where,
+                                    why = string.format('names "%s", which is an alias a version manager'
+                                          .. ' looks up rather than a version', tostring(text)),
+                                    surface = "NPM-SURFACE.md: " .. VERSION_FILE_ROW }
+      else
+        local allowed = engines.satisfying(version, nil) or {}
+        local kept = {}
+        for _, candidate in ipairs(candidates) do
+          if contains(allowed, candidate) then kept[#kept + 1] = candidate end
+        end
+        if #kept == 0 then
+          blockers[#blockers + 1] = { construct = name, where = where,
+                                      why = string.format('names node %s, and no pinned node satisfies it'
+                                            .. ' together with engines: this plugin pins %s', text,
+                                            pinned_versions()),
+                                      surface = "NPM-SURFACE.md: " .. VERSION_FILE_ROW }
+        end
+        candidates = kept
+      end
+    end
+  end
+  return candidates, blockers
+end
 
 local NESTED_PACKAGE = "is a package.json below the package root, which node reads for the resolution"
                        .. " of the files under it (its \"imports\" map, a self-reference by name),"
@@ -284,8 +338,6 @@ end
 local REFUSED_FILES = {
   { name = "npm-shrinkwrap.json", why = NPM_CONFIGURATION,
     row = "4. Install, lockfile and registry configuration: an `npm-shrinkwrap.json`" },
-  { name = ".nvmrc", why = VERSION_MANAGER, row = "1. The runtime" },
-  { name = ".node-version", why = VERSION_MANAGER, row = "1. The runtime" },
   { name = "yarn.lock", why = FOREIGN_LOCKFILE, row = FOREIGN_LOCKFILE_ROW },
   { name = "pnpm-lock.yaml", why = FOREIGN_LOCKFILE, row = FOREIGN_LOCKFILE_ROW },
   { name = "bun.lock", why = FOREIGN_LOCKFILE, row = FOREIGN_LOCKFILE_ROW },
@@ -391,6 +443,12 @@ local function run(context)
   end
   local rc = npmrc_of(context, files)
   translation.config.npmConfig, translation.config.npmrc = rc.config, rc.where
+  local narrowed, version_blockers = narrowed_by_version_files(context, files, translation.candidates)
+  if #version_blockers > 0 then
+    return result(context, translation.config, file_blockers(context, files, version_blockers), { where })
+  end
+  translation.candidates = narrowed
+  translation.config.version = narrowed[1]
   if files.exists["package-lock.json"] then
     local lock_where = within(context.dir, "package-lock.json")
     local version, refusal = accepting_version(context, translation.candidates, where, lock_where,
@@ -438,6 +496,9 @@ local function run(context)
   if files.exists["package-lock.json"] then owned[#owned + 1] = within(context.dir, "package-lock.json") end
   if files.exists["node_modules"] then owned[#owned + 1] = within(context.dir, "node_modules") end
   if files.exists[npmrc.NAME] then owned[#owned + 1] = rc.where end
+  for _, name in ipairs(VERSION_FILES) do
+    if files.exists[name] then owned[#owned + 1] = within(context.dir, name) end
+  end
   return result(context, translation.config, blockers, owned, lock_text)
 end
 
@@ -446,6 +507,8 @@ local function build(context)
   local translation = translate.package(daukle.read(where), where)
   local files = file_facts(context)
   local env = npmrc.env(npmrc_of(context, files).config)
+  translation.candidates = narrowed_by_version_files(context, files, translation.candidates)
+  translation.config.version = translation.candidates[1]
   if files.exists["package-lock.json"] then
     translation.config.version = accepting_version(context, translation.candidates, where,
                                                    within(context.dir, "package-lock.json"), env)
