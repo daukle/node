@@ -138,8 +138,9 @@ local function proof_of(context, config)
     as = "bytes",
   } }
   if config[published.KEY] == nil then return { task = context.instance .. ":tree", compare = compare } end
-  compare[2] = { old = derived(context, "migrate-old/" .. pack.LISTING_NAME),
-                 new = derived(context, pack.LISTING_NAME), as = "bytes" }
+  -- the packed package.json is rendered rather than the author's bytes, so it is equal by value (ruling 5.1)
+  compare[2] = { old = derived(context, "migrate-old/" .. pack.TARBALL_NAME),
+                 new = derived(context, pack.TARBALL_NAME), as = "archive-json" }
   return { task = context.instance .. ":migration-proof", compare = compare }
 end
 
