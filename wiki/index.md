@@ -52,6 +52,13 @@ resolved and npm reaches no network. A build with ranges and no pins, or ranges 
 resolve, is refused naming the resolve command. `packages` and `devPackages` in `[toolchains.node]`
 were this toolchain's keys up to 3.x and are refused by name since 4.0.0.
 
+**A pnpm project is pinned by `daukle/pnpm` instead**, declared in `[toolchains.pnpm]` with a
+`pnpm` version beside `version`, and resolved with `daukle pnpm:resolve --resolve` into
+`daukle/pnpm/lock.lua`. `node:install` fetches each pinned tarball, serves exactly those on a
+loopback registry and runs the pinned pnpm with `--frozen-lockfile` against it, so the
+`node_modules` is pnpm's own layout and a package left unpinned fails as a 404. One package root
+installs with one package manager: npm's and pnpm's pins together are refused.
+
 A module of yours, run by `node:run` or a script, has the package root as its working directory: the
 directory of the instance (`dir`), or the project root. A relative path in a module means what it
 meant under npm. Only `node:install` and `node:tree` work in the generated directory, and `node:tree`

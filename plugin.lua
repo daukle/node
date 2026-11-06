@@ -16,6 +16,7 @@ local pins = daukle.require("lib/pins")
 local npm_launcher = daukle.require("lib/npm_launcher")
 local pack = daukle.require("lib/pack")
 local published = daukle.require("lib/published")
+local pnpm_mirror = daukle.require("lib/pnpm_mirror")
 local nested = daukle.require("lib/nested")
 
 daukle.toolchain{
@@ -35,6 +36,10 @@ daukle.toolchain{
       [nested.PLACEMENTS_NAME] = nested.placements_json(spec.nested),
     }
     if spec.lock ~= nil then files["package-lock.json"] = spec.lock.text end
+    if spec.pnpm_lock ~= nil then
+      files["pnpm-lock.yaml"] = spec.pnpm_lock.text
+      files[pnpm_mirror.SCRIPT_NAME] = pnpm_mirror.SCRIPT
+    end
     if spec.published ~= nil then
       files[pack.MANIFEST_NAME] = published.manifest(spec)
       files[pack.SCRIPT_NAME] = pack.SCRIPT
@@ -94,8 +99,25 @@ end
 --- Installs exactly the pinned closure, with npm reaching no network: every tarball this host
 --- installs is fetched by daukle against its sha256 and handed to npm's cache, which npm keys
 --- by the lockfile's integrity, so a tarball missing from it fails ENOTCACHED naming it.
+--- Installs a pnpm project's pinned closure with its pinned pnpm, through a loopback mirror of
+--- the tarballs daukle fetched, so `--frozen-lockfile` reaches no network (D-251).
+local function install_with_pnpm(context, spec, root, pick)
+  local lock = spec.pnpm_lock
+  local fetched = {}
+  for _, entry in ipairs(pins.for_host(lock.entries, context.host)) do
+    fetched[#fetched + 1] = { url = entry.url, file = daukle.artifact{ url = entry.url, sha256 = entry.sha256, as = entry.as } }
+  end
+  daukle.write{ path = pnpm_mirror.MAP_NAME, text = pnpm_mirror.map_json(fetched) }
+  local pnpm_root = daukle.provision{ url = lock.pnpm.url, sha256 = lock.pnpm.sha256, as = "pnpm " .. lock.pnpm.version }
+  daukle.exec(root:tool(pick.node), { "./" .. pnpm_mirror.SCRIPT_NAME, pnpm_mirror.MAP_NAME,
+                                      pnpm_root:path("package/bin/pnpm.cjs"), "install", "--frozen-lockfile",
+                                      "--store-dir", "pnpm-store" })
+  return root, pick
+end
+
 local function install_packages(context, spec)
   local root, pick = provision_node(context, spec)
+  if spec.pnpm_lock ~= nil then return install_with_pnpm(context, spec, root, pick) end
   local node, npm = root:tool(pick.node), root:path(pick.npm)
   if spec.lock == nil then
     daukle.exec(node, through_launcher({ npm, "install", "--offline", "--no-audit", "--no-fund" }))
