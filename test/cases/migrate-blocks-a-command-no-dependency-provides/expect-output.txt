@@ -1,1 +1,1 @@
-no direct dependency provides
+no installed package provides

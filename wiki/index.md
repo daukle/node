@@ -152,7 +152,8 @@ toolchain cannot.
 - `main`, as `entry`, when the project declares no scripts.
 - `scripts` made of `node <file> <args>`, `npm run <name>` (and `npm test`, `start`, `stop`,
   `restart`) of a declared script, and `<command> <args>` where exactly one direct dependency
-  provides the command, joined by `&&`.
+  provides the command, or none does and exactly one package at the top of the installed
+  `node_modules` does, as npm's own `.bin` would run it, joined by `&&`.
 - Metadata that no build reads: `name`, `version`, `description`, `license`, `author`,
   `contributors`, `keywords`, `repository`, `homepage`, `bugs`, `private`, `funding`.
 - A `package-lock.json` and `node_modules`, which move aside.
@@ -162,7 +163,7 @@ toolchain cannot.
 - A shell: a pipe, `||`, `VAR=value`, a glob, a redirect, a line break, a quote that is not a whole
   word, and builtins and keywords such as `cd`, `rm`, `echo`, `exec`, `time`, `exit`, `if`, `for`.
 - `npx`, `pnpm`, `yarn`, `bun`, `deno`, `node` followed by a flag, and any other `npm` verb.
-- A command no direct dependency provides, or two do.
+- A command no installed package provides, or two of the same rank do.
 - A dependency on a local path: `file:`, `link:`, or a path such as `./lib`, `../lib`, `/abs` or a
   `.tgz` file, and a `workspace:` or `catalog:` range.
 - Dependencies npm cannot install as declared, with no lockfile and no project `.npmrc`: a version

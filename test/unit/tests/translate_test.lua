@@ -120,6 +120,6 @@ return {
   resolves({ tsc = { provider("@scope/tsc", false) } }, { bin = "@scope/tsc", args = { "-p", "." } }),
   resolves({ tsc = { provider("@scope/tsc", true) } },
            { bin = "@scope/tsc", binName = "tsc", args = { "-p", "." } }),
-  command_blocked({}, "no direct dependency provides"),
+  command_blocked({}, "no installed package provides"),
   command_blocked({ tsc = { provider("a", true), provider("b", false) } }, "both a and b"),
 }
