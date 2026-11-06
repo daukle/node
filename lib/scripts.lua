@@ -51,9 +51,10 @@ local function checked_args(args, where)
   for index = 1, #args do
     local argument = args[index]
     local is_glob = type(argument) == "table" and type(argument.glob) == "string" and next(argument, next(argument)) == nil
-    if type(argument) ~= "string" and not is_glob then
-      error(string.format('%s has an argument that is a %s, and every argument is a string or'
-                          .. ' { glob = "<pattern>" }', where, type(argument)), 0)
+    local is_passed = type(argument) == "table" and argument.passed == true and next(argument, next(argument)) == nil
+    if type(argument) ~= "string" and not is_glob and not is_passed then
+      error(string.format('%s has an argument that is a %s, and every argument is a string,'
+                          .. ' { glob = "<pattern>" } or { passed = true }', where, type(argument)), 0)
     end
     out[index] = argument
   end
@@ -92,6 +93,8 @@ local function checked_remove(step, where)
   return { kind = "remove", paths = paths, recursive = step.recursive == true, force = step.force == true }
 end
 
+local checked_echo, checked_attempt, steps_of
+
 --[[ A step is a ONE-KEY table rather than a command string, so that nothing
      here has to guess where a word ends. A string would also be the place a
      shell crept in. A shell stays refused; the migrator turns the common
@@ -105,6 +108,8 @@ local function checked_step(step, where)
                         .. ' run = { tool, args }', where, type(step)), 0)
   end
   if step.remove ~= nil then return checked_remove(step, where) end
+  if step.echo ~= nil then return checked_echo(step, where) end
+  if step.attempt ~= nil or step.otherwise ~= nil then return checked_attempt(step, where) end
   local kind
   for key in pairs(step) do
     if STEP_KINDS[key] then
@@ -136,7 +141,33 @@ local function checked_step(step, where)
            binName = step.binName, env = checked_env(step.env, where) }
 end
 
-local function steps_of(value, where)
+--- An `echo` step: the words it prints, as `echo` would, joined by one space.
+function checked_echo(step, where)
+  for key in pairs(step) do
+    if key ~= "echo" then
+      error(string.format('"%s" is not a key an echo step knows, in %s', key, where), 0)
+    end
+  end
+  return { kind = "echo", args = checked_args(step.echo, where) }
+end
+
+--- An `attempt` step: its `otherwise` steps run when one of its `attempt` steps fails, which is
+--- what `a || b` did in the script.
+function checked_attempt(step, where)
+  for key in pairs(step) do
+    if key ~= "attempt" and key ~= "otherwise" then
+      error(string.format('"%s" is not a key an attempt step knows, in %s: it takes "attempt" and'
+                          .. ' "otherwise"', key, where), 0)
+    end
+  end
+  if step.attempt == nil or step.otherwise == nil then
+    error(string.format('%s needs both "attempt" and "otherwise"', where), 0)
+  end
+  return { kind = "attempt", attempt = steps_of(step.attempt, where .. " attempt"),
+           otherwise = steps_of(step.otherwise, where .. " otherwise") }
+end
+
+function steps_of(value, where)
   if type(value) ~= "table" then
     error(string.format('%s is a %s, and a script is a step or a list of steps', where,
                         type(value)), 0)
@@ -155,13 +186,26 @@ end
      so they are refused where sync can see them rather than when the task runs:
      a script that calls itself would otherwise provision a runtime and recurse
      until something else gave way. ]]
+--- Every checked step, an attempt step's own steps in its place.
+local function flattened(steps)
+  local out = {}
+  for _, step in ipairs(steps) do
+    if step.kind == "attempt" then
+      for _, inner in ipairs(flattened(step.attempt)) do out[#out + 1] = inner end
+      for _, inner in ipairs(flattened(step.otherwise)) do out[#out + 1] = inner end
+    else
+      out[#out + 1] = step
+    end
+  end
+  return out
+end
+
 local function reject_unreachable_references(declared)
   local by_name = {}
   for index = 1, #declared do by_name[declared[index].name] = declared[index] end
 
   local function walk(script, path, on_path)
-    for index = 1, #script.steps do
-      local step = script.steps[index]
+    for _, step in ipairs(flattened(script.steps)) do
       if step.kind == "script" then
         local target = by_name[step.name]
         if target == nil then
