@@ -103,6 +103,22 @@ local function install_packages(context, spec)
   return root, pick
 end
 
+local run_steps
+
+--- Runs the project's own `prepare`, which npm runs after a bare install and before a pack (D-243).
+local function run_prepare(context, spec)
+  for _, script in ipairs(spec.scripts) do
+    if script.name == "prepare" then run_steps(context, spec, script) end
+  end
+end
+
+local function declares_prepare(spec)
+  for _, script in ipairs(spec.scripts) do
+    if script.name == "prepare" then return true end
+  end
+  return false
+end
+
 local function install_and_link(context, spec)
   local root, pick = install_packages(context, spec)
   daukle.exec(root:tool(pick.node), { "./" .. links.SCRIPT_NAME, context.root })
@@ -112,7 +128,9 @@ end
 daukle.task{
   name = "node:install",
   run = function(context)
-    install_and_link(context, settings.read(context))
+    local spec = settings.read(context)
+    install_and_link(context, spec)
+    run_prepare(context, spec)
   end,
 }
 
@@ -130,6 +148,10 @@ daukle.task{
     end
     local root, pick = provision_node(context, spec)
     local node, npm = root:tool(pick.node), root:path(pick.npm)
+    if declares_prepare(spec) then
+      install_packages(context, spec)
+      run_prepare(context, spec)
+    end
     local argv = { "./" .. pack.SCRIPT_NAME, "stage", npm, context.root, pack.MANIFEST_NAME, pack.STAGE_DIR, "." }
     local result = daukle.exec(node, argv, { check = false })
     if result.code == pack.NO_ROOT_MANIFEST then
@@ -223,7 +245,7 @@ end
 
 --- Runs a script's steps, `appended` going to the end of the last one, which is where npm puts the
 --- words after `npm run <name> --`: it appends them to the script's command line (D-244).
-local function run_steps(context, spec, script, appended)
+function run_steps(context, spec, script, appended)
   for index = 1, #script.steps do
     local step = script.steps[index]
     local extra = index == #script.steps and (appended or {}) or {}

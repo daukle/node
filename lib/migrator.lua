@@ -529,7 +529,9 @@ local function build(context)
   if translation.config[published.KEY] ~= nil then
     daukle.write{ path = "migrate-old/" .. pack.SCRIPT_NAME, text = pack.SCRIPT }
     local climb = paths.climb_from(context.dir)
-    daukle.exec(root:tool(pick.node), { climb .. derived(context, "migrate-old/" .. pack.SCRIPT_NAME), "in-place",
+    local mode = type(translation.original_scripts) == "table" and translation.original_scripts.prepare ~= nil
+                 and "with-scripts" or "in-place"
+    daukle.exec(root:tool(pick.node), { climb .. derived(context, "migrate-old/" .. pack.SCRIPT_NAME), mode,
                                         root:path(pick.npm), ".", climb .. derived(context, "migrate-old") },
                 { cwd = context.dir or "." })
   end
