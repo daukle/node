@@ -489,9 +489,51 @@ local function take_boundaries(context, facts)
   return next(entries) ~= nil and entries or nil, paths_taken
 end
 
-local function run(context)
+local function directory_of(path)
+  return string.sub(path, 1, #path - #"/package.json")
+end
+
+local function is_at_or_below(directory, path)
+  return path == directory or string.sub(path, 1, #directory + 1) == directory .. "/"
+end
+
+--- Takes the nested packages of their own out of `facts.nested`, returning their directories,
+--- relative to the project, for core to migrate as instances of their own (core api 10, D-248).
+--- Only the outermost is taken, with every file below it, since its own migration reads the rest.
+---
+--- @implNote nothing is taken below a package declaring `workspaces`: its nested packages are its
+--- members, which still block as the workspaces row does.
+local function take_instances(context, facts, declares_workspaces)
+  if declares_workspaces then return {} end
+  local instances, relative = {}, {}
+  for _, path in ipairs(facts.nested) do
+    local directory = directory_of(path)
+    local inside_taken = false
+    for _, taken in ipairs(relative) do inside_taken = inside_taken or is_at_or_below(taken, directory) end
+    if not inside_taken and nested.directory_problem(directory) == nil
+       and not nested.boundary_of(daukle.read(within(context.dir, path))) then
+      relative[#relative + 1] = directory
+      instances[#instances + 1] = within(context.dir, directory)
+    end
+  end
+  local kept = {}
+  for _, path in ipairs(facts.nested) do
+    local below_taken = false
+    for _, taken in ipairs(relative) do below_taken = below_taken or is_at_or_below(taken, path) end
+    if not below_taken then kept[#kept + 1] = path end
+  end
+  facts.nested = kept
+  return instances
+end
+
+local function declares_workspaces(text)
+  if type(text) == "string" and string.sub(text, 1, 3) == "\239\187\191" then text = string.sub(text, 4) end
+  if string.match(text or "", "^%s*{") == nil then return false end
+  return daukle.json_parse(text).workspaces ~= nil
+end
+
+local function run_package(context, files)
   local where = within(context.dir, "package.json")
-  local files = file_facts(context)
   local boundaries, boundary_files = take_boundaries(context, files)
   local translation = translate.package(daukle.read(where), where)
   translation.config[nested.KEY] = boundaries
@@ -572,6 +614,15 @@ local function run(context)
     if files.exists[name] then owned[#owned + 1] = within(context.dir, name) end
   end
   return result(context, translation.config, blockers, owned, lock_text)
+end
+
+local function run(context)
+  local files = file_facts(context)
+  local instances = take_instances(context, files,
+                                   declares_workspaces(daukle.read(within(context.dir, "package.json"))))
+  local answer = run_package(context, files)
+  answer.instances = instances
+  return answer
 end
 
 --- The old project installed as pnpm installs it, with the release its `packageManager` names.

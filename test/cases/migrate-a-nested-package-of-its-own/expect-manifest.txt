@@ -1,0 +1,3 @@
+[toolchains.node-tools]
+toolchain = "node"
+dir = "tools"
