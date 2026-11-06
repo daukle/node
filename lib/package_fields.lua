@@ -24,7 +24,6 @@ package_fields.ABSENT = {
   bin = "7. Packing and publishing: the project's own `bin`",
   exports = package_fields.ROWS.main,
   imports = "2. Module resolution: the project's own `\"imports\"`, `#`-specifiers",
-  files = "7. Packing and publishing: `files`, `.npmignore`",
   publishConfig = "7. Packing and publishing: `publishConfig`",
   config = "5. Scripts: the `config` field",
   os = "3. Dependencies", cpu = "3. Dependencies",
@@ -37,7 +36,7 @@ package_fields.ABSENT = {
 --- @implNote `engines` is absent on purpose: it is read for `version` AND carried,
 --- because what a package supports is not which node daukle runs (`AUTHORING.md`).
 package_fields.READ = { dependencies = true, devDependencies = true, type = true,
-                        main = true, scripts = true }
+                        main = true, scripts = true, files = true }
 
 --- Fields describing the package, which the generated file deliberately leaves out.
 package_fields.METADATA = { name = true, version = true, description = true, license = true, author = true,
@@ -132,6 +131,8 @@ local function is_json_value(text)
   daukle.json_parse('{"v":' .. text .. "}")
   return true
 end
+
+package_fields.is_json_value = is_json_value
 
 --- The checked fields, sorted by name, and their values.
 function package_fields.checked(config, written)
