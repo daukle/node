@@ -232,8 +232,9 @@ one of its rows.
   file blocker in one run. **Its `.gitignore` facts still come from the node probe**, so they appear
   only once translation passes.
 - **`run` then reads `package.json` with `daukle.read` and installs its dependencies into
-  `migrate-probe/`** with `--ignore-scripts`, to learn which direct dependency provides each command
-  a script runs. The install's output is captured, so `daukle migrate` is silent while it runs. It runs
+  `migrate-probe/`** with `--ignore-scripts`, to learn which package provides each command a script
+  runs: a direct dependency first, else any package npm placed at the top of `node_modules`, whose
+  bins npm links into `.bin` too (`D-233`). Two providers at the same rank block. The install's output is captured, so `daukle migrate` is silent while it runs. It runs
   with `check = false`, and `lib/npm_errors.lua` reads npm's `npm error code` line: a resolution
   code (`ETARGET`, `E404`, `ERESOLVE`, `EUNSUPPORTEDPROTOCOL`, `EINVALIDTAGNAME`, `E401`, `E403`)
   is one blocker carrying npm's lines and its log path, beside the file blockers, with only the

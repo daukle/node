@@ -309,7 +309,7 @@ local function resolve_commands(config, bins, where)
         local providers = bins[step.command] or {}
         if #providers == 0 then
           blocker(blockers, 'scripts."' .. name .. '"', where, string.format('runs "%s", which no'
-                  .. ' direct dependency provides', step.command), SURFACE.scripts)
+                  .. ' installed package provides', step.command), SURFACE.scripts)
         elseif #providers > 1 then
           blocker(blockers, 'scripts."' .. name .. '"', where, string.format('runs "%s", which'
                   .. ' both %s provide', step.command, provider_names(providers)),

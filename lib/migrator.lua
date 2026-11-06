@@ -9,7 +9,7 @@ local PROBE_NAME = "__daukle_probe__.mjs"
 --[[ @implNote the bins are read from the probe's own install so that the
      answer is npm's layout, not a guess from names. ]]
 local PROBE = [==[
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -75,8 +75,22 @@ try {
   for (const entry of ROOT_ENTRIES) reincludedBy[entry.fact] = { unreadable: String(error.message ?? error) };
 }
 const own = JSON.parse(readFileSync(join(here, "package.json"), "utf8"));
+const direct = new Set(Object.keys({ ...own.dependencies, ...own.devDependencies }));
+/** @implNote every package at the top of node_modules, scoped ones included: npm links each one's bins into node_modules/.bin, so a script runs a transitive package's command too. */
+function topLevelPackages() {
+  const names = [];
+  let entries;
+  try { entries = readdirSync(join(here, "node_modules")); } catch { return names; }
+  for (const entry of entries) {
+    if (entry.startsWith(".")) continue;
+    if (!entry.startsWith("@")) { names.push(entry); continue; }
+    for (const scoped of readdirSync(join(here, "node_modules", entry))) names.push(entry + "/" + scoped);
+  }
+  return names;
+}
 const bins = {};
-for (const name of Object.keys({ ...own.dependencies, ...own.devDependencies })) {
+const transitiveBins = {};
+for (const name of topLevelPackages()) {
   let manifest;
   try { manifest = JSON.parse(readFileSync(join(here, "node_modules", name, "package.json"), "utf8")); }
   catch { continue; }
@@ -84,8 +98,10 @@ for (const name of Object.keys({ ...own.dependencies, ...own.devDependencies }))
   const commands = typeof manifest.bin === "string"
     ? [name.replace(/^@[^/]+\//, "")]
     : Object.keys(map ? manifest.bin : {});
-  for (const command of commands) (bins[command] ??= []).push({ name, map });
+  const into = direct.has(name) ? bins : transitiveBins;
+  for (const command of commands) (into[command] ??= []).push({ name, map });
 }
+for (const [command, providers] of Object.entries(transitiveBins)) bins[command] ??= providers;
 process.stdout.write(JSON.stringify({ bins, reincludedBy }));
 ]==]
 
