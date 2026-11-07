@@ -220,7 +220,10 @@ toolchain cannot.
   an `engines` that is not a map.
 - An `.npmrc` key `daukle/npm` refuses (a registry, a credential, a `${VAR}` value, a key daukle sets
   itself), an ini section or list, or an `.npmrc` beside a package with no dependencies.
-- An `npm-shrinkwrap.json`, `.nvmrc` or `.node-version`, and another package manager's
+- A node version no pinned node satisfies, from an `.nvmrc` or `.node-version` or a
+  `frontend-maven-plugin` `nodeVersion` in the `pom.xml` beside the package, and an alias in a
+  version file.
+- An `npm-shrinkwrap.json`, and another package manager's
   lockfile: `yarn.lock`, `bun.lock`, `bun.lockb`, or a `pnpm-lock.yaml` without a pnpm
   `packageManager`. A pnpm `packageManager` with no `pnpm-lock.yaml`, or beside a
   `package-lock.json`, and a `pnpm-workspace.yaml`.
