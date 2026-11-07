@@ -1,6 +1,6 @@
 daukle.plugin{
   api = 10,
-  uses = { "provision", "artifact", "exec", "read", "parse", "write", "json_parse", "list" },
+  uses = { "provision", "artifact", "exec", "read", "parse", "write", "json_parse", "list", "run_task" },
   exports = { "lib/runtimes" },
 }
 
@@ -295,6 +295,23 @@ end
 
 local run_step_list
 
+--- The task of a nested package's own instance, named as core names an instance it migrated:
+--- `node-<dir>` below the project, every `/` a `-` (D-248).
+local function nested_task_name(context, step)
+  local root = package_root(context)
+  local directory = root == "." and step.package or (root .. "/" .. step.package)
+  return "node-" .. (string.gsub(directory, "/", "-")) .. ":" .. scripts.task_name_of(step.name)
+end
+
+--- Runs a nested package's script as that package's own task, keeping why it failed for the
+--- script's error, since a step reports only an exit code.
+local function run_nested_script(context, spec, step)
+  local ok, why = daukle.run_task(nested_task_name(context, step))
+  if ok then return 0 end
+  spec.nested_failure = why
+  return 1
+end
+
 --- Runs one step and returns its exit code. `extra` is appended to its words; `passed` fills
 --- each `{ passed = true }`.
 local function run_step(context, spec, step, extra, passed)
@@ -304,6 +321,8 @@ local function run_step(context, spec, step, extra, passed)
     if code == 0 then return 0 end
     return run_step_list(context, spec, step.otherwise, extra, passed)
   end
+  spec.nested_failure = nil
+  if step.kind == "script" and step.package ~= nil then return run_nested_script(context, spec, step) end
   if step.kind == "script" then
     -- read() has already refused a reference to no script and a cycle, so a
     -- second check here would be a second place for the rule to disagree.
@@ -355,6 +374,9 @@ end
 
 function run_script_steps(context, spec, script)
   local code = run_steps(context, spec, script)
+  if code ~= 0 and spec.nested_failure ~= nil then
+    error(string.format('scripts."%s" failed: %s', script.name, spec.nested_failure), 0)
+  end
   if code ~= 0 then error(string.format('scripts."%s" failed: a step exited with code %d', script.name, code), 0) end
 end
 

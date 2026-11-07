@@ -8,6 +8,19 @@ local STEP_KINDS = { module = true, bin = true, script = true, remove = true }
 
 local ENV_NAME = "^[%a_][%w_]*$"
 
+--- npm's shorthands for running a script, each to the script it runs.
+local NPM_SHORTHANDS = { test = "test", t = "test", start = "start", stop = "stop", restart = "restart" }
+
+--- Whether a nested package's directory is a plain relative path below this package.
+local function is_package_directory(path)
+  if type(path) ~= "string" or path == "" or string.find(path, "\\", 1, true) then return false end
+  if string.match(path, "^/") or string.match(path, "^%a:") then return false end
+  for segment in string.gmatch(path, "[^/]+") do
+    if segment == ".." or segment == "." then return false end
+  end
+  return not string.match(path, "//") and not string.match(path, "/$")
+end
+
 --[[ @implNote npm spells a hierarchy with a colon and a daukle task name holds
      at most one, which is the toolchain prefix. A dot is legal and NOT ONE of
      this tree's 904 script names contains one, against 137 that contain a
@@ -149,7 +162,7 @@ local function checked_step(step, where)
                             where, kind, key), 0)
       end
       kind = key
-    elseif key ~= "args" and key ~= "binName" and key ~= "env" then
+    elseif key ~= "args" and key ~= "binName" and key ~= "env" and key ~= "package" and key ~= "shorthand" then
       error(string.format('"%s" is not a key a step knows, in %s: a step names one of "module",'
                           .. ' "bin", "script" or "remove". There is no shell and no "npx": for anything'
                           .. ' else, use a manifest task\'s run = { tool, args }', key, where), 0)
@@ -168,8 +181,21 @@ local function checked_step(step, where)
   if kind ~= "bin" and step.binName ~= nil then
     error(string.format('%s has a "binName" without a "bin"', where), 0)
   end
+  if kind ~= "script" and (step.package ~= nil or step.shorthand ~= nil) then
+    error(string.format('%s has a "package" or "shorthand" without a "script"', where), 0)
+  end
+  if step.shorthand ~= nil and NPM_SHORTHANDS[step.shorthand] ~= step[kind] then
+    error(string.format('%s has a "shorthand" that is not npm\'s for running "%s"', where, step[kind]), 0)
+  end
+  if step.package ~= nil and not is_package_directory(step.package) then
+    error(string.format('%s has a "package" that is not a directory below this package', where), 0)
+  end
+  if step.package ~= nil and step.args ~= nil then
+    error(string.format('%s runs a nested package\'s script, which takes no "args" yet', where), 0)
+  end
   return { kind = kind, name = step[kind], args = checked_args(step.args, where),
-           binName = step.binName, env = checked_env(step.env, where) }
+           binName = step.binName, env = checked_env(step.env, where), package = step.package,
+           shorthand = step.shorthand }
 end
 
 --- An `echo` step: the words it prints, as `echo` would, joined by one space.
@@ -259,7 +285,7 @@ local function reject_unreachable_references(declared)
 
   local function walk(script, path, on_path)
     for _, step in ipairs(flattened(script.steps)) do
-      if step.kind == "script" then
+      if step.kind == "script" and step.package == nil then
         local target = by_name[step.name]
         if target == nil then
           error(string.format('scripts."%s" runs "%s", which is not a declared script',
@@ -354,4 +380,5 @@ local function task_scripts(document)
 end
 
 return { read = read, task_scripts = task_scripts, task_name_of = task_name_of,
-         task_name_problem = task_name_problem, remove_flag = remove_flag }
+         task_name_problem = task_name_problem, remove_flag = remove_flag, NPM_SHORTHANDS = NPM_SHORTHANDS,
+         is_package_directory = is_package_directory }
