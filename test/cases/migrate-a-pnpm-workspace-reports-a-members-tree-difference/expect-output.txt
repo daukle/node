@@ -1,0 +1,2 @@
+the new build differs from the old one
+lines only in the old build: ".pnpm semver@7.6.3", "semver semver@7.6.3"; lines only in the new build: ".pnpm semver@7.6.2", "semver semver@7.6.2"

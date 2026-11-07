@@ -177,14 +177,16 @@ end
 --- carries neither.
 ---
 --- @implNote a workspace member hands nothing over and keeps its ranges in its own block: the
---- root's pins cover every member (spec 4.2).
+--- root's pins cover every member (spec 4.2), so a root hands its lockfile over even when it
+--- declares no dependency of its own.
 local function dependencies_of(config, lock_text)
   local packages, dev_packages, npm_config = config.packages, config.devPackages, config.npmConfig
   local npmrc_where, overrides, pnpm = config.npmrc, config.overrides, config.pnpm
   config.npmConfig, config.npmrc, config.pnpm = nil, nil, nil
   if type(config[pnpm_workspace.KEY]) == "string" then return {} end
   config.packages, config.devPackages, config.overrides = nil, nil, nil
-  if lock_text == nil or not (has_any(packages) or has_any(dev_packages)) then return {} end
+  local is_workspace_root = type(config[pnpm_workspace.KEY]) == "table"
+  if lock_text == nil or not (is_workspace_root or has_any(packages) or has_any(dev_packages)) then return {} end
   if pnpm ~= nil then
     return { { kind = "dependencies", id = "pnpm",
                config = { version = config.version, pnpm = pnpm, packages = packages or {},
@@ -212,7 +214,8 @@ local PROBE_IDENTITY ='"name": "daukle-migrate-probe", "version": "0.0.0"'
 
 --- Where the original workspace's install places each project's modules, relative to it: pnpm
 --- reads `--modules-dir` against every importer, the root's included.
-local WORKSPACE_MODULES_DIR = "build/daukle/migrate-workspace/node_modules"
+local WORKSPACE_INSTALL_DIR = "build/daukle/migrate-workspace"
+local WORKSPACE_MODULES_DIR = WORKSPACE_INSTALL_DIR .. "/node_modules"
 
 --- Whether the root's run installed the original workspace, read from the root's own modules
 --- directory, which pnpm writes `.modules.yaml` into even where a member declares no dependency.
@@ -948,6 +951,17 @@ local REMOVE_WORKSPACE_STATE = 'const fs = require("node:fs");'
                                .. ' fs.rmSync("node_modules/.pnpm-workspace-state-v1.json", { force: true });'
                                .. ' try { fs.rmdirSync("node_modules"); } catch {}'
 
+local REMOVE_DIRECTORIES = 'const fs = require("node:fs");'
+                           .. ' for (const path of process.argv.slice(1)) fs.rmSync(path, { recursive: true, force: true });'
+
+--- Removes what an earlier run's install of the workspace left in the root's and each member's
+--- `WORKSPACE_INSTALL_DIR`, so that only this run's install counts as installed.
+local function remove_earlier_install(context, root, pick, members)
+  local argv = { "-e", REMOVE_DIRECTORIES, WORKSPACE_INSTALL_DIR }
+  for _, member in ipairs(members) do argv[#argv + 1] = member .. "/" .. WORKSPACE_INSTALL_DIR end
+  daukle.exec(root:tool(pick.node), argv, { cwd = context.dir or "." })
+end
+
 --- The original workspace installed once, with the project's own pnpm and its lockfile, in the
 --- project's own tree: each project's modules land in its `WORKSPACE_MODULES_DIR`, and the virtual
 --- store and the store in the root's derived `migrate-workspace`, so nothing is written outside a
@@ -958,9 +972,10 @@ local REMOVE_WORKSPACE_STATE = 'const fs = require("node:fs");'
 ---
 --- @implNote pnpm 10 writes `node_modules/.pnpm-workspace-state-v1.json` at the workspace root
 --- whatever `--modules-dir` says, so a `node_modules` the project did not have is removed again.
-local function install_old_workspace(context, root, pick, pnpm, env)
+local function install_old_workspace(context, root, pick, pnpm, env, members)
   local had_modules = names_in(context.dir)["node_modules"] == true
   local climb = paths.climb_from(context.dir)
+  remove_earlier_install(context, root, pick, members)
   install_pnpm(context, root, pick, pnpm, env)
   local install = daukle.exec(root:tool(pick.node), {
     climb .. derived(context, PNPM_ENTRY), "install", "--frozen-lockfile", "--ignore-scripts",
@@ -1065,7 +1080,8 @@ local function run(context)
   end
   if workspace ~= nil and #answer.blockers == 0 then
     local root, pick = provision(context, config.version)
-    local refusal = install_old_workspace(context, root, pick, pnpm, npmrc.env(npmrc_of(context, files).config))
+    local refusal = install_old_workspace(context, root, pick, pnpm, npmrc.env(npmrc_of(context, files).config),
+                                          members)
     if refusal ~= nil then
       answer.blockers[#answer.blockers + 1] = {
         construct = PNPM_LOCK, where = within(context.dir, PNPM_LOCK),
@@ -1102,13 +1118,23 @@ local function install_old(context, files, translation, root, pick, env)
   daukle.exec(root:tool(pick.node), install, { cwd = derived(context, "migrate-old"), env = env })
 end
 
---- @implNote a workspace member's old side installs nothing of its own, and neither does its new
---- side: the one install of the original workspace is the root's.
+--- The tree script's arguments for the old side of a workspace's root or member: its modules from
+--- the one install of the original workspace, `run`'s, and the workspace root its links are read
+--- against. Paths climb from the derived `migrate-old`, where the script runs.
+local function old_workspace_tree_arguments(context, workspace_dir)
+  local climb = paths.climb_from(derived(context, "migrate-old"))
+  return { "--modules", climb .. within(context.dir, WORKSPACE_MODULES_DIR),
+           "--workspace", climb .. (workspace_dir or ".") }
+end
+
+--- @implNote neither a workspace's root nor its members install here: each reads its old tree from
+--- the one install of the original workspace the root's `run` made.
 local function build(context)
   local where = within(context.dir, "package.json")
   local translation = translation_of(context, workspace_root_of(context))
   local is_member = translation.root ~= nil
   local files = file_facts(context)
+  local is_workspace_root = not is_member and pnpm_workspace_of(context, files, translation.config) ~= nil
   local env = npmrc.env(npmrc_of(context, files).config)
   translation.candidates = narrowed_by_version_files(context, files, translation.candidates)
   translation.config.version = translation.candidates[1]
@@ -1121,9 +1147,18 @@ local function build(context)
     if unresolved ~= nil then error("npm install failed: " .. unresolved, 0) end
   end
   local root, pick = provision(context, translation.config.version)
-  if not is_member then install_old(context, files, translation, root, pick, env) end
+  local tree_argv = { "./" .. tree.SCRIPT_NAME }
+  if is_member or is_workspace_root then
+    local workspace_dir = context.dir
+    if is_member then workspace_dir = translation.root.dir end
+    for _, argument in ipairs(old_workspace_tree_arguments(context, workspace_dir)) do
+      tree_argv[#tree_argv + 1] = argument
+    end
+  else
+    install_old(context, files, translation, root, pick, env)
+  end
   daukle.write{ path = "migrate-old/" .. tree.SCRIPT_NAME, text = tree.SCRIPT }
-  daukle.exec(root:tool(pick.node), { "./" .. tree.SCRIPT_NAME }, { cwd = derived(context, "migrate-old") })
+  daukle.exec(root:tool(pick.node), tree_argv, { cwd = derived(context, "migrate-old") })
   if translation.config[published.KEY] ~= nil then
     daukle.write{ path = "migrate-old/" .. pack.SCRIPT_NAME, text = pack.SCRIPT }
     local climb = paths.climb_from(context.dir)

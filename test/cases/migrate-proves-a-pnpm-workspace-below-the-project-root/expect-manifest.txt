@@ -1,0 +1,6 @@
+[toolchains.node-ui]
+"packages/a" = "node-ui-packages-a"
+"packages/b" = "node-ui-packages-b"
+[toolchains.node-ui-packages-b]
+dir = "ui/packages/b"
+workspace = "node-ui"

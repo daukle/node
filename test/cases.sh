@@ -177,6 +177,30 @@ run_migrate_case() {
       grep -qF "$absent" "$sandbox/both.txt" && { fail "$label" "the output carries what it must not: $absent"; return 1; }
     done < "$case_dir/expect-absent.txt"
   fi
+  if [ -f "$case_dir/expect-once.txt" ]; then
+    while IFS= read -r once || [ -n "$once" ]; do
+      [ -z "$once" ] && continue
+      count=$(grep -cF "$once" "$sandbox/both.txt" || true)
+      [ "$count" -eq 1 ] || { fail "$label" "the output carries $count times what it must carry once: $once"; return 1; }
+    done < "$case_dir/expect-once.txt"
+  fi
+  # Each line is a path in the project, a space, and a clause that file must carry (or, in the
+  # -absent file, must not), which is how a case asserts what a proof compared.
+  if [ -f "$case_dir/expect-file-lines.txt" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      [ -z "$line" ] && continue
+      grep -qF -- "${line#* }" "$sandbox/${line%% *}" 2>/dev/null ||
+        { fail "$label" "${line%% *} does not carry: ${line#* }"; return 1; }
+    done < "$case_dir/expect-file-lines.txt"
+  fi
+  if [ -f "$case_dir/expect-file-lines-absent.txt" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      [ -z "$line" ] && continue
+      [ -f "$sandbox/${line%% *}" ] || { fail "$label" "${line%% *} was not written"; return 1; }
+      grep -qF -- "${line#* }" "$sandbox/${line%% *}" &&
+        { fail "$label" "${line%% *} carries what it must not: ${line#* }"; return 1; }
+    done < "$case_dir/expect-file-lines-absent.txt"
+  fi
   grep_clauses_in "$sandbox/daukle.toml" "$case_dir/expect-manifest.txt" || return 1
   if [ -f "$case_dir/expect-manifest-absent.txt" ]; then
     while IFS= read -r absent || [ -n "$absent" ]; do

@@ -1,0 +1,3 @@
+pnpm-lock.yaml: does not install the workspace with its own pnpm
+ERR_PNPM_OUTDATED_LOCKFILE
+packages/b/package.json: scripts: run commands of the workspace's packages, and the workspace root package.json did not install it
