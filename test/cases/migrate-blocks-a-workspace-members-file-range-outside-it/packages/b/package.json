@@ -1,1 +1,1 @@
-{"name":"b","version":"1.0.0","private":true,"dependencies":{"x":"file:../../../outside"}}
+{"name":"b","version":"1.0.0","private":true,"dependencies":{"x":"file:../../vendor/x"}}

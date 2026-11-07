@@ -15,8 +15,8 @@ importers:
   packages/b:
     dependencies:
       x:
-        specifier: file:../../../outside
-        version: file:../outside
+        specifier: file:../../vendor/x
+        version: file:vendor/x
 
 packages:
 
@@ -32,8 +32,8 @@ packages:
   ms@2.1.2:
     resolution: {integrity: sha512-sGkPx+VjMtmA6MX27oA4FBFELFCZZ4S4XqeGOXCv68tT+jb3vk/RyaKWP0PTKyWtmLSM0b+adUTEvbs1PEaH2w==}
 
-  x@file:../outside:
-    resolution: {directory: ../outside, type: directory}
+  x@file:vendor/x:
+    resolution: {directory: vendor/x, type: directory}
 
 snapshots:
 
@@ -43,4 +43,4 @@ snapshots:
 
   ms@2.1.2: {}
 
-  x@file:../outside: {}
+  x@file:vendor/x: {}

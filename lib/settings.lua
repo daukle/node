@@ -249,6 +249,7 @@ local function published_of(config)
   return value
 end
 
+--- @implNote a workspace root's block accepts `workspace:`, `catalog:` and `file:` pins as well, for the root's own dependency on a member (vue's `"@vue/compiler-sfc": "workspace:*"`), which a later change translates.
 local function read(context)
   local config = config_of(context)
   reject_unknown_keys(config)

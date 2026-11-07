@@ -214,6 +214,12 @@ local PROBE_IDENTITY ='"name": "daukle-migrate-probe", "version": "0.0.0"'
 --- reads `--modules-dir` against every importer, the root's included.
 local WORKSPACE_MODULES_DIR = "build/daukle/migrate-workspace/node_modules"
 
+--- Whether the root's run installed the original workspace, read from the root's own modules
+--- directory, which pnpm writes `.modules.yaml` into even where a member declares no dependency.
+local function is_workspace_installed(root)
+  return daukle.list(within(root.dir, WORKSPACE_MODULES_DIR)) ~= nil
+end
+
 local function npm_install_for_probe(context, root, pick, config, env)
   daukle.write{ path = "migrate-probe/package.json", text = '{' .. PROBE_IDENTITY
                 .. ', "private": true, "dependencies": ' .. json_object(config.packages)
@@ -734,6 +740,12 @@ local function run_package(context, files, translation, workspace, members)
     blockers = { { construct = "package.json", where = where,
                    why = "npm install could not resolve the declared dependencies: " .. unresolved,
                    surface = "NPM-SURFACE.md: " .. UNRESOLVED_ROW } }
+  elseif is_member and next(translation.commands) ~= nil and not is_workspace_installed(translation.root) then
+    blockers = { { construct = "scripts", where = where,
+                   why = "run commands of the workspace's packages, and the workspace root "
+                         .. within(translation.root.dir, "package.json") .. " did not install it, so"
+                         .. " which package provides each command cannot be resolved",
+                   surface = "NPM-SURFACE.md: " .. package_fields.ROWS.workspaces } }
   else
     blockers = translate.resolve_commands(translation.config, facts.bins, where)
     if #blockers == 0 then
@@ -937,7 +949,8 @@ local REMOVE_WORKSPACE_STATE = 'const fs = require("node:fs");'
 --- store and the store in the root's derived `migrate-workspace`, so nothing is written outside a
 --- `build/daukle` directory.
 ---
---- @return string|nil why pnpm refused the install, its first error line, or nil once it installed
+--- @return string|nil why pnpm refused the install, its first `ERR_PNPM_` line, or nil once it
+--- installed; any other failure, a network one among them, raises
 ---
 --- @implNote pnpm 10 writes `node_modules/.pnpm-workspace-state-v1.json` at the workspace root
 --- whatever `--modules-dir` says, so a `node_modules` the project did not have is removed again.
@@ -956,7 +969,12 @@ local function install_old_workspace(context, root, pick, pnpm, env)
   end
   if install.code == 0 then return nil end
   local output = (install.stdout or "") .. "\n" .. (install.stderr or "")
-  return string.match(output, "(ERR_PNPM_[^\r\n]+)") or string.format("pnpm exited with code %d", install.code)
+  local refusal = string.match(output, "(ERR_PNPM_[^\r\n]+)")
+  if refusal == nil then
+    error("pnpm install of the workspace failed with code " .. install.code .. ": "
+          .. (string.match(output, "([^\r\n]+)[\r\n%s]*$") or ""), 0)
+  end
+  return refusal
 end
 
 --- The translation of a package, a pnpm workspace member's when `root` is its workspace root.
@@ -970,6 +988,13 @@ local function translation_of(context, root)
   if root ~= nil then
     translation.root = root
     translation.config[pnpm_workspace.KEY] = root.instance
+    if translation.config.overrides ~= nil then
+      translation.config.overrides = nil
+      translation.blockers[#translation.blockers + 1] = {
+        construct = '"overrides"', where = where, surface = "NPM-SURFACE.md: " .. translate.SURFACE.overrides,
+        why = "overrides packages in a pnpm workspace member, and pnpm applies overrides only from the"
+              .. " workspace root, so they would not apply" }
+    end
   end
   return translation
 end
@@ -1014,7 +1039,7 @@ local function run(context)
         construct = PNPM_LOCK, where = within(context.dir, PNPM_LOCK),
         why = "does not install the workspace with its own pnpm, so its members' commands cannot be"
               .. " resolved: " .. refusal,
-        surface = "NPM-SURFACE.md: " .. package_fields.ROWS.workspaces }
+        surface = "NPM-SURFACE.md: " .. LOCKFILE_ROW }
     end
   end
   answer.instances = instances
