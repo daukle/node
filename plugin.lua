@@ -383,9 +383,15 @@ end
 
 local run_step_list
 
---- The task of a nested package's own instance, named as core names an instance it migrated:
---- `node-<dir>` below the project, every `/` a `-` (D-248).
-local function nested_task_name(context, step)
+--- The task of a nested package's own instance: the instance a workspace's `members` maps the
+--- directory to, else as core names an instance it migrated, `node-<dir>` below the project with
+--- every `/` a `-` (D-248).
+local function nested_task_name(context, spec, step)
+  for _, member in ipairs(spec.workspace and spec.workspace.members or {}) do
+    if member.dir == step.package then
+      return member.instance .. ":" .. scripts.task_name_of(step.name)
+    end
+  end
   local root = package_root(context)
   local directory = root == "." and step.package or (root .. "/" .. step.package)
   return "node-" .. (string.gsub(directory, "/", "-")) .. ":" .. scripts.task_name_of(step.name)
@@ -394,7 +400,7 @@ end
 --- Runs a nested package's script as that package's own task, keeping why it failed for the
 --- script's error, since a step reports only an exit code.
 local function run_nested_script(context, spec, step)
-  local ok, why = daukle.run_task(nested_task_name(context, step))
+  local ok, why = daukle.run_task(nested_task_name(context, spec, step))
   if ok then return 0 end
   spec.nested_failure = why
   return 1

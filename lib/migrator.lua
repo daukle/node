@@ -1045,9 +1045,10 @@ end
 
 local function run(context)
   local files = file_facts(context)
-  local translation = translation_of(context, workspace_root_of(context))
+  local root = workspace_root_of(context)
+  local translation = translation_of(context, root)
   local workspace, members, member_refusals = workspace_and_members(context, files, translation)
-  if workspace ~= nil then translation = translation_of(context, nil, member_names_of(context, members)) end
+  if workspace ~= nil then translation = translation_of(context, root, member_names_of(context, members)) end
   local instances = take_instances(context, files, members)
   if member_refusals ~= nil then
     for _, refused in ipairs(unplaceable_member_blockers(context, files, members)) do
