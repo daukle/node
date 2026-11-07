@@ -9,7 +9,8 @@ published.KEY = "package"
 --- other key of this toolchain already carries.
 published.FIELDS = { name = true, version = true, description = true, license = true, author = true,
                      contributors = true, keywords = true, repository = true, homepage = true,
-                     bugs = true, private = true, funding = true, main = true, exports = true, files = true }
+                     bugs = true, private = true, funding = true, main = true, exports = true, files = true,
+                     publishConfig = true }
 
 local function json_string(text)
   local escaped = string.gsub(text, '[%c"\\]', function(character)

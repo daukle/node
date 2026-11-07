@@ -202,7 +202,7 @@ local function published_of(config)
     local label = '"' .. published.KEY .. "." .. tostring(name) .. '"'
     if not published.FIELDS[name] then
       error(label .. " is not a field this table publishes: it holds the name, version, metadata,"
-            .. ' "main", "exports" and "files", and every other field has a key of its own', 0)
+            .. ' "main", "exports", "files" and "publishConfig", and every other field has a key of its own', 0)
     end
     if type(text) ~= "string" or not package_fields.is_json_value(text) then
       error(label .. " must be one JSON value as text, such as '\"1.0.0\"'", 0)
