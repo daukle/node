@@ -1,0 +1,6 @@
+[toolchains.node.scripts.build]
+script = "build"
+package = "packages/a"
+"packages/a" = "node-packages-a"
+[toolchains.node-packages-a.scripts.build]
+module = "build.js"

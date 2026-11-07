@@ -11,6 +11,7 @@ local scripts = daukle.require("lib/scripts")
 local nested = daukle.require("lib/nested")
 local package_fields = daukle.require("lib/package_fields")
 local frontend_pom = daukle.require("lib/frontend_pom")
+local pnpm_workspace = daukle.require("lib/pnpm_workspace")
 
 local PROBE_NAME = "__daukle_probe__.mjs"
 
@@ -18,10 +19,11 @@ local PROBE_NAME = "__daukle_probe__.mjs"
      answer is npm's layout, not a guess from names. ]]
 local PROBE = [==[
 import { readdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
+const modules = process.argv[3] ? resolve(process.argv[3]) : join(here, "node_modules");
 
 /** @implNote no accepted form ends in a slash: git classifies a POSIX symlink as a file, so a directory-only pattern does not ignore the link node:install places (Git for Windows treats a junction as a directory, which hides this there). */
 const ROOT_ENTRIES = [
@@ -86,18 +88,18 @@ try {
 function topLevelPackages() {
   const names = [];
   let entries;
-  try { entries = readdirSync(join(here, "node_modules")); } catch { return names; }
+  try { entries = readdirSync(modules); } catch { return names; }
   for (const entry of entries) {
     if (entry.startsWith(".")) continue;
     if (!entry.startsWith("@")) { names.push(entry); continue; }
-    for (const scoped of readdirSync(join(here, "node_modules", entry))) names.push(entry + "/" + scoped);
+    for (const scoped of readdirSync(join(modules, entry))) names.push(entry + "/" + scoped);
   }
   return names.sort((left, right) => ("node_modules/" + left).localeCompare("node_modules/" + right, "en"));
 }
 const bins = {};
 for (const name of topLevelPackages()) {
   let manifest;
-  try { manifest = JSON.parse(readFileSync(join(here, "node_modules", name, "package.json"), "utf8")); }
+  try { manifest = JSON.parse(readFileSync(join(modules, name, "package.json"), "utf8")); }
   catch { continue; }
   const map = typeof manifest.bin === "object" && manifest.bin !== null;
   const commands = typeof manifest.bin === "string"
@@ -173,12 +175,18 @@ end
 --- The dependencies, handed to daukle/npm's translator, or daukle/pnpm's for a pnpm project, rather
 --- than written here: that block holds the ranges and its pin file the closure, so node's own block
 --- carries neither.
+---
+--- @implNote a workspace member hands nothing over and keeps its ranges in its own block: the
+--- root's pins cover every member (spec 4.2), so a root hands its lockfile over even when it
+--- declares no dependency of its own.
 local function dependencies_of(config, lock_text)
   local packages, dev_packages, npm_config = config.packages, config.devPackages, config.npmConfig
   local npmrc_where, overrides, pnpm = config.npmrc, config.overrides, config.pnpm
-  config.packages, config.devPackages, config.npmConfig, config.npmrc, config.overrides = nil, nil, nil, nil, nil
-  config.pnpm = nil
-  if lock_text == nil or not (has_any(packages) or has_any(dev_packages)) then return {} end
+  config.npmConfig, config.npmrc, config.pnpm = nil, nil, nil
+  if type(config[pnpm_workspace.KEY]) == "string" then return {} end
+  config.packages, config.devPackages, config.overrides = nil, nil, nil
+  local is_workspace_root = type(config[pnpm_workspace.KEY]) == "table"
+  if lock_text == nil or not (is_workspace_root or has_any(packages) or has_any(dev_packages)) then return {} end
   if pnpm ~= nil then
     return { { kind = "dependencies", id = "pnpm",
                config = { version = config.version, pnpm = pnpm, packages = packages or {},
@@ -204,30 +212,46 @@ end
 
 local PROBE_IDENTITY ='"name": "daukle-migrate-probe", "version": "0.0.0"'
 
---[[ @implNote the probe script still runs after a failed install, because the
-     ignore facts need no node_modules and the report should carry them beside
-     the install failure. ]]
-local function probe(context, config, env)
-  local root, pick = provision(context, config.version)
+--- Where the original workspace's install places each project's modules, relative to it: pnpm
+--- reads `--modules-dir` against every importer, the root's included.
+local WORKSPACE_INSTALL_DIR = "build/daukle/migrate-workspace"
+local WORKSPACE_MODULES_DIR = WORKSPACE_INSTALL_DIR .. "/node_modules"
+
+--- Whether the root's run installed the original workspace, read from the root's own modules
+--- directory, which pnpm writes `.modules.yaml` into even where a member declares no dependency.
+local function is_workspace_installed(root)
+  return daukle.list(within(root.dir, WORKSPACE_MODULES_DIR)) ~= nil
+end
+
+local function npm_install_for_probe(context, root, pick, config, env)
   daukle.write{ path = "migrate-probe/package.json", text = '{' .. PROBE_IDENTITY
                 .. ', "private": true, "dependencies": ' .. json_object(config.packages)
                 .. ', "devDependencies": ' .. json_object(config.devPackages)
                 .. (config.overrides == nil and "" or (', "overrides": ' .. config.overrides)) .. '}\n' }
-  daukle.write{ path = "migrate-probe/" .. PROBE_NAME, text = PROBE }
   local install = daukle.exec(root:tool(pick.node), { root:path(pick.npm), "install",
                                                       "--ignore-scripts", "--include=dev" },
                               { cwd = derived(context, "migrate-probe"), capture = true, env = env,
                                 check = false })
+  if install.code == 0 then return nil end
+  local failure = npm_errors.of_install(install.stderr, install.code)
+  if not failure.resolution then error("npm install failed: " .. failure.message, 0) end
+  return failure.message
+end
+
+--- The probe's facts: each command the package's modules provide, and the ignore facts. A
+--- workspace member installs nothing of its own and reads the modules its root's install placed.
+---
+--- @implNote the probe script still runs after a failed install, because the ignore facts need no
+--- node_modules and the report should carry them beside the install failure.
+local function probe(context, config, env, is_member)
+  local root, pick = provision(context, config.version)
   local unresolved = nil
-  if install.code ~= 0 then
-    local failure = npm_errors.of_install(install.stderr, install.code)
-    if not failure.resolution then error("npm install failed: " .. failure.message, 0) end
-    unresolved = failure.message
-  end
-  local answer = daukle.exec(root:tool(pick.node),
-                             { paths.climb_from(context.dir) .. derived(context, "migrate-probe/" .. PROBE_NAME),
-                               paths.climb_from(context.dir) },
-                             { cwd = context.dir or ".", capture = true })
+  if not is_member then unresolved = npm_install_for_probe(context, root, pick, config, env) end
+  daukle.write{ path = "migrate-probe/" .. PROBE_NAME, text = PROBE }
+  local argv = { paths.climb_from(context.dir) .. derived(context, "migrate-probe/" .. PROBE_NAME),
+                 paths.climb_from(context.dir) }
+  if is_member then argv[3] = WORKSPACE_MODULES_DIR end
+  local answer = daukle.exec(root:tool(pick.node), argv, { cwd = context.dir or ".", capture = true })
   return daukle.json_parse(answer.stdout), unresolved
 end
 
@@ -405,7 +429,9 @@ local REFUSED_FILES = {
   { name = "pnpm-lock.yaml", why = FOREIGN_LOCKFILE, row = FOREIGN_LOCKFILE_ROW },
   { name = "bun.lock", why = FOREIGN_LOCKFILE, row = FOREIGN_LOCKFILE_ROW },
   { name = "bun.lockb", why = FOREIGN_LOCKFILE, row = FOREIGN_LOCKFILE_ROW },
-  { name = "pnpm-workspace.yaml", why = "declares a pnpm workspace, which daukle/pnpm does not install yet",
+  { name = pnpm_workspace.NAME, why = "declares a pnpm workspace, which this toolchain migrates only for a"
+                                       .. " project that installs with pnpm: a committed pnpm-lock.yaml and a"
+                                       .. " packageManager naming pnpm",
     row = package_fields.ROWS.workspaces },
 }
 
@@ -451,8 +477,11 @@ local function is_pnpm_project(files, config)
 end
 
 --- Why a `packageManager` naming pnpm cannot be handed to daukle/pnpm, or nil when it can.
-local function pnpm_blockers(context, files, config, where)
-  if config.pnpm == nil or is_pnpm_project(files, config) then return {} end
+---
+--- @implNote a workspace member's own `packageManager` is not checked: pnpm installs the member
+--- from its root's lockfile, with the root's release.
+local function pnpm_blockers(files, config, where, is_member)
+  if is_member or config.pnpm == nil or is_pnpm_project(files, config) then return {} end
   local why = files.exists["package-lock.json"]
               and "names pnpm, and the project also commits a package-lock.json, so which closure it installs is ambiguous"
               or "names pnpm, and the project commits no pnpm-lock.yaml for daukle/pnpm to pin"
@@ -460,8 +489,10 @@ local function pnpm_blockers(context, files, config, where)
              surface = "NPM-SURFACE.md: " .. FOREIGN_LOCKFILE_ROW } }
 end
 
+local OWNED_BY_A_PNPM_PROJECT = { [PNPM_LOCK] = true, [pnpm_workspace.NAME] = true }
+
 local function is_refused_file(facts, refused)
-  return facts.exists[refused.name] and not (refused.name == PNPM_LOCK and facts.installs_with_pnpm)
+  return facts.exists[refused.name] and not (OWNED_BY_A_PNPM_PROJECT[refused.name] and facts.installs_with_pnpm)
 end
 
 local function file_blockers(context, facts, blockers)
@@ -544,34 +575,57 @@ local function directory_of(path)
   return string.sub(path, 1, #path - #"/package.json")
 end
 
+local function nested_directories(facts)
+  local directories = {}
+  for index, path in ipairs(facts.nested) do directories[index] = directory_of(path) end
+  return directories
+end
+
 local function is_at_or_below(directory, path)
   return path == directory or string.sub(path, 1, #directory + 1) == directory .. "/"
 end
 
---- Takes the nested packages of their own out of `facts.nested`, returning their directories,
---- relative to the project, for core to migrate as instances of their own (core api 10, D-248).
---- Only the outermost is taken, with every file below it, since its own migration reads the rest.
+local function is_below_any(directories, path)
+  for _, taken in ipairs(directories) do
+    if is_at_or_below(taken, path) then return true end
+  end
+  return false
+end
+
+local function is_package_of_its_own(context, path)
+  return not nested.boundary_of(daukle.read(within(context.dir, path)))
+end
+
+local function is_candidate(context, path, is_member)
+  if is_member == nil then return is_package_of_its_own(context, path) end
+  return is_member[directory_of(path)] == true
+end
+
+--- Takes the nested packages of their own out of `facts.nested`, returning their directories for
+--- core to migrate as instances of their own (core api 10, D-248). Only the outermost is taken,
+--- with every file below it, since its own migration reads the rest. With `members`, a
+--- workspace's member directories, only those are taken.
 ---
---- @implNote nothing is taken below a workspace root, whether `workspaces` or a `pnpm-workspace.yaml`
---- declares it: its nested packages are its members, which still block as the workspaces row does.
-local function take_instances(context, facts, declares_workspaces)
-  if declares_workspaces then return {} end
+--- @implNote a workspace's other nested packages are never taken, whether `workspaces` or a
+--- `pnpm-workspace.yaml` declares it: they still block as the nested-package row does.
+local function take_instances(context, facts, members)
+  local is_member = nil
+  if members ~= nil then
+    is_member = {}
+    for _, directory in ipairs(members) do is_member[directory] = true end
+  end
   local instances, relative = {}, {}
   for _, path in ipairs(facts.nested) do
     local directory = directory_of(path)
-    local inside_taken = false
-    for _, taken in ipairs(relative) do inside_taken = inside_taken or is_at_or_below(taken, directory) end
-    if not inside_taken and nested.directory_problem(directory) == nil
-       and not nested.boundary_of(daukle.read(within(context.dir, path))) then
+    if not is_below_any(relative, directory) and nested.directory_problem(directory) == nil
+       and is_candidate(context, path, is_member) then
       relative[#relative + 1] = directory
       instances[#instances + 1] = within(context.dir, directory)
     end
   end
   local kept = {}
   for _, path in ipairs(facts.nested) do
-    local below_taken = false
-    for _, taken in ipairs(relative) do below_taken = below_taken or is_at_or_below(taken, path) end
-    if not below_taken then kept[#kept + 1] = path end
+    if not is_below_any(relative, path) then kept[#kept + 1] = path end
   end
   facts.nested = kept
   return instances
@@ -585,13 +639,88 @@ local function declares_workspaces(context, files)
   return daukle.json_parse(text).workspaces ~= nil
 end
 
-local function run_package(context, files)
+local WORKSPACE_FIELD = '"workspaces"'
+
+--- The pnpm workspace a project that installs with pnpm declares, or nil when it declares none:
+--- its `packages` globs, its catalogs, and a blocker for each key or line it cannot carry.
+local function pnpm_workspace_of(context, files, config)
+  if not files.exists[pnpm_workspace.NAME] or not is_pnpm_project(files, config) then return nil end
+  local where = within(context.dir, pnpm_workspace.NAME)
+  local workspace, problem = pnpm_workspace.parse(daukle.read(where))
+  local surface = "NPM-SURFACE.md: " .. package_fields.ROWS.workspaces
+  if workspace == nil then
+    return { packages = {}, blockers = { { construct = pnpm_workspace.NAME, where = where, why = problem,
+                                           surface = surface } } }
+  end
+  workspace.blockers = {}
+  for _, key in ipairs(workspace.unknown) do
+    workspace.blockers[#workspace.blockers + 1] = { construct = key, where = where, surface = surface,
+                                                    why = "is a workspace setting this toolchain does not carry over" }
+  end
+  for _, pattern in ipairs(pnpm_workspace.brace_globs(workspace)) do
+    workspace.blockers[#workspace.blockers + 1] = { construct = pattern, where = where, surface = surface,
+                                                    why = "is a packages glob with a brace set, which pnpm expands"
+                                                          .. " and this toolchain does not, so its members are unknown" }
+  end
+  return workspace
+end
+
+--- A blocker for each member whose directory cannot be an instance of its own, its package.json
+--- taken out of `facts.nested` so that it is not also the nested-package blocker.
+local function unplaceable_member_blockers(context, facts, members)
+  local refused, blockers = {}, {}
+  for _, directory in ipairs(members) do
+    local problem = nested.directory_problem(directory)
+    if problem ~= nil then
+      refused[directory .. "/package.json"] = true
+      blockers[#blockers + 1] = { construct = directory, where = within(context.dir, directory .. "/package.json"),
+                                  why = "is a workspace member whose directory " .. problem,
+                                  surface = "NPM-SURFACE.md: " .. package_fields.ROWS.workspaces }
+    end
+  end
+  local kept = {}
+  for _, path in ipairs(facts.nested) do
+    if not refused[path] then kept[#kept + 1] = path end
+  end
+  facts.nested = kept
+  return blockers
+end
+
+--- The translation's blockers without the one the `"workspaces"` field raises: beside a
+--- `pnpm-workspace.yaml`, pnpm ignores the field, so the migration owns and drops it.
+local function without_workspaces_field(blockers)
+  local kept = {}
+  for _, refused in ipairs(blockers) do
+    if refused.construct ~= WORKSPACE_FIELD then kept[#kept + 1] = refused end
+  end
+  return kept
+end
+
+--- The instance core names for the package in `dir`: `node` at the project root, else
+--- `node-<dir>` with each `/` as `-`.
+local function instance_of(dir)
+  if dir == nil then return "node" end
+  return "node-" .. (string.gsub(dir, "/", "-"))
+end
+
+--- The root's `workspace` key: each member's directory below the root mapped to the instance core
+--- migrates it as, so the root's install runs the instances daukle.toml names.
+local function adopt_workspace(context, translation, workspace, members)
+  translation.blockers = without_workspaces_field(translation.blockers)
+  for _, refused in ipairs(workspace.blockers) do translation.blockers[#translation.blockers + 1] = refused end
+  local instances = {}
+  for _, member in ipairs(members) do instances[member] = instance_of(within(context.dir, member)) end
+  translation.config[pnpm_workspace.KEY] = { members = instances, catalog = workspace.catalog,
+                                             catalogs = workspace.catalogs }
+end
+
+local function run_package(context, files, translation, workspace, members)
   local where = within(context.dir, "package.json")
   local boundaries, boundary_files = take_boundaries(context, files)
-  local translation = translate.package(daukle.read(where), where)
   translation.config[nested.KEY] = boundaries
   files.installs_with_pnpm = is_pnpm_project(files, translation.config)
-  for _, refused in ipairs(pnpm_blockers(context, files, translation.config, where)) do
+  if workspace ~= nil then adopt_workspace(context, translation, workspace, members) end
+  for _, refused in ipairs(pnpm_blockers(files, translation.config, where, translation.root ~= nil)) do
     translation.blockers[#translation.blockers + 1] = refused
   end
   if #translation.blockers > 0 then
@@ -619,14 +748,21 @@ local function run_package(context, files)
     end
     translation.config.version = version
   end
-  local facts, unresolved = probe(context, translation.config, npmrc.env(rc.config))
-  local lock_text = unresolved == nil and lock_of(context, files) or nil
+  local is_member = translation.root ~= nil
+  local facts, unresolved = probe(context, translation.config, npmrc.env(rc.config), is_member)
+  local lock_text = (unresolved == nil and not is_member) and lock_of(context, files) or nil
   if files.installs_with_pnpm then lock_text = daukle.read(within(context.dir, PNPM_LOCK)) end
   local blockers
   if unresolved ~= nil then
     blockers = { { construct = "package.json", where = where,
                    why = "npm install could not resolve the declared dependencies: " .. unresolved,
                    surface = "NPM-SURFACE.md: " .. UNRESOLVED_ROW } }
+  elseif is_member and next(translation.commands) ~= nil and not is_workspace_installed(translation.root) then
+    blockers = { { construct = "scripts", where = where,
+                   why = "run commands of the workspace's packages, and the workspace root "
+                         .. within(translation.root.dir, "package.json") .. " did not install it, so"
+                         .. " which package provides each command cannot be resolved",
+                   surface = "NPM-SURFACE.md: " .. package_fields.ROWS.workspaces } }
   else
     blockers = translate.resolve_commands(translation.config, facts.bins, where)
     if #blockers == 0 then
@@ -661,6 +797,7 @@ local function run_package(context, files)
   for _, path in ipairs(boundary_files) do owned[#owned + 1] = path end
   if files.exists["package-lock.json"] then owned[#owned + 1] = within(context.dir, "package-lock.json") end
   if files.installs_with_pnpm then owned[#owned + 1] = within(context.dir, PNPM_LOCK) end
+  if workspace ~= nil then owned[#owned + 1] = within(context.dir, pnpm_workspace.NAME) end
   if files.exists["node_modules"] then owned[#owned + 1] = within(context.dir, "node_modules") end
   if files.exists[npmrc.NAME] then owned[#owned + 1] = rc.where end
   for _, name in ipairs(VERSION_FILES) do
@@ -685,9 +822,11 @@ local NESTED_SCRIPT_ROW = "5. Scripts: `npm <script> --prefix <dir>`, a nested p
 
 --- A blocker for each `--prefix` step whose directory is not a nested package handed back as an
 --- instance, or whose package declares no such script: the step runs that instance's task (D-255).
-local function nested_script_blockers(context, config, instances, where)
+--- Every workspace member counts as handed back, a member below another member among them.
+local function nested_script_blockers(context, config, instances, members, where)
   local handed_back = {}
   for _, directory in ipairs(instances) do handed_back[directory] = true end
+  for _, member in ipairs(members or {}) do handed_back[within(context.dir, member)] = true end
   local blockers = {}
   for name, value in pairs(config.scripts or {}) do
     each_step(value, function(step)
@@ -713,39 +852,312 @@ local function nested_script_blockers(context, config, instances, where)
   return blockers
 end
 
+--- The names in a directory of the project, `dir` nil for its root, as a set.
+local function names_in(dir)
+  local found = {}
+  for _, entry in ipairs(daukle.list(dir or ".") or {}) do found[entry.name] = true end
+  return found
+end
+
+local function parent_of(dir)
+  return string.match(dir, "^(.+)/[^/]+$")
+end
+
+local function relative_to(dir, path)
+  if dir == nil then return path end
+  if path == dir then return "" end
+  return string.sub(path, #dir + 2)
+end
+
+local function installs_with_pnpm_in(dir, exists)
+  if not exists["package.json"] then return false end
+  local where = within(dir, "package.json")
+  return is_pnpm_project({ exists = exists }, translate.package(daukle.read(where), where).config)
+end
+
+local function root_of_member(context, dir, exists)
+  local workspace = pnpm_workspace.parse(daukle.read(within(dir, pnpm_workspace.NAME)))
+  if workspace == nil or not installs_with_pnpm_in(dir, exists) then return nil end
+  local relative = relative_to(dir, context.dir)
+  if #pnpm_workspace.members(workspace, { relative }) == 0 then return nil end
+  return { dir = dir, instance = instance_of(dir), workspace = workspace }
+end
+
+--- The pnpm workspace root this package is a member of, `{ dir, instance, workspace }`, or nil.
+---
+--- @implNote the nearest `pnpm-workspace.yaml` above the package decides, as pnpm's own lookup
+--- does: a package its globs do not match is in no workspace, even below a farther one that would.
+local function workspace_root_of(context)
+  if context.dir == nil then return nil end
+  local dir = context.dir
+  repeat
+    dir = parent_of(dir)
+    local exists = names_in(dir)
+    if exists[pnpm_workspace.NAME] then return root_of_member(context, dir, exists) end
+  until dir == nil
+  return nil
+end
+
+--- The project-relative directory a `file:` range names from `dir`, "" for the project root, or
+--- nil when it is absolute or climbs out of the project.
+local function directory_named(dir, range)
+  local target = string.sub(range, #"file:" + 1)
+  if string.find(target, "\\", 1, true) or string.match(target, "^/") or string.match(target, "^%a:") then
+    return nil
+  end
+  local segments = {}
+  for segment in string.gmatch(dir or "", "[^/]+") do segments[#segments + 1] = segment end
+  for segment in string.gmatch(target, "[^/]+") do
+    if segment == ".." then
+      if #segments == 0 then return nil end
+      segments[#segments] = nil
+    elseif segment ~= "." then
+      segments[#segments + 1] = segment
+    end
+  end
+  return table.concat(segments, "/")
+end
+
+--- Whether a `file:` range names the workspace root or one of its members, which pnpm links.
+local function is_inside_workspace(context, root, range)
+  local target = directory_named(context.dir, range)
+  if target == nil or (root.dir ~= nil and not is_at_or_below(root.dir, target)) then return false end
+  local relative = relative_to(root.dir, target)
+  if relative ~= "" and #pnpm_workspace.members(root.workspace, { relative }) == 0 then return false end
+  return names_in(target ~= "" and target or nil)["package.json"] == true
+end
+
+--- The workspace's members below this member, relative to it.
+local function members_below(context, root, files)
+  local prefix = relative_to(root.dir, context.dir) .. "/"
+  local candidates = {}
+  for index, directory in ipairs(nested_directories(files)) do candidates[index] = prefix .. directory end
+  local below = {}
+  for index, member in ipairs(pnpm_workspace.members(root.workspace, candidates)) do
+    below[index] = string.sub(member, #prefix + 1)
+  end
+  return below
+end
+
+local PNPM_BIN_DIR = "migrate-pnpm/node_modules/pnpm/bin"
+local PNPM_BIN_NAME = "pnpm.cjs"
+local PNPM_BIN = "bin/" .. PNPM_BIN_NAME
+local PNPM_ENTRY = PNPM_BIN_DIR .. "/" .. PNPM_BIN_NAME
+
+--- The release the project's `packageManager` names, installed into the derived `migrate-pnpm`.
+---
+--- @implNote pnpm comes from the registry through the provisioned npm, as corepack would fetch it:
+--- the old side is the original tool's own run, which may reach the network as its `npm ci` does.
+---
+--- @return boolean whether the release ships `PNPM_ENTRY`, the file node runs it from
+---
+--- @implNote pnpm 12.4.2 ships `bin/pnpm.mjs` and a native launcher and no `bin/pnpm.cjs`, which
+--- node would fail to find with no `ERR_PNPM_` line to report.
+local function install_pnpm(context, root, pick, pnpm, env)
+  daukle.write{ path = "migrate-pnpm/package.json",
+                text = '{ "private": true, "dependencies": { "pnpm": "' .. pnpm .. '" } }\n' }
+  daukle.exec(root:tool(pick.node), { root:path(pick.npm), "install", "--ignore-scripts", "--no-audit", "--no-fund" },
+              { cwd = derived(context, "migrate-pnpm"), env = env })
+  return names_in(derived(context, PNPM_BIN_DIR))[PNPM_BIN_NAME] == true
+end
+
+--- The surface row daukle/pnpm's own `packageManager` blockers name.
+local PNPM_RELEASE_SURFACE = "NPM-SURFACE.md: dependencies"
+
+local REMOVE_WORKSPACE_STATE = 'const fs = require("node:fs");'
+                               .. ' fs.rmSync("node_modules/.pnpm-workspace-state-v1.json", { force: true });'
+                               .. ' try { fs.rmdirSync("node_modules"); } catch {}'
+
+local REMOVE_DIRECTORIES = 'const fs = require("node:fs");'
+                           .. ' for (const path of process.argv.slice(1)) fs.rmSync(path, { recursive: true, force: true });'
+
+--- Removes what an earlier run's install of the workspace left in the root's and each member's
+--- `WORKSPACE_INSTALL_DIR`, so that only this run's install counts as installed.
+local function remove_earlier_install(context, root, pick, members)
+  local argv = { "-e", REMOVE_DIRECTORIES, WORKSPACE_INSTALL_DIR }
+  for _, member in ipairs(members) do argv[#argv + 1] = member .. "/" .. WORKSPACE_INSTALL_DIR end
+  daukle.exec(root:tool(pick.node), argv, { cwd = context.dir or "." })
+end
+
+--- The original workspace installed once, with the project's own pnpm and its lockfile, in the
+--- project's own tree: each project's modules land in its `WORKSPACE_MODULES_DIR`, and the virtual
+--- store and the store in the root's derived `migrate-workspace`, so nothing is written outside a
+--- `build/daukle` directory.
+---
+--- @return table|nil the blocker when the project's pnpm cannot be run or refused the install,
+--- naming its first `ERR_PNPM_` line, or nil once it installed; any other failure, a network one
+--- among them, raises
+---
+--- @implNote pnpm 10 writes `node_modules/.pnpm-workspace-state-v1.json` at the workspace root
+--- whatever `--modules-dir` says, so a `node_modules` the project did not have is removed again.
+local function install_old_workspace(context, root, pick, pnpm, env, members)
+  local had_modules = names_in(context.dir)["node_modules"] == true
+  local climb = paths.climb_from(context.dir)
+  remove_earlier_install(context, root, pick, members)
+  if not install_pnpm(context, root, pick, pnpm, env) then
+    return { construct = '"packageManager"', where = within(context.dir, "package.json"),
+             why = 'names pnpm "' .. pnpm .. '", a release that ships no ' .. PNPM_BIN .. ' for node to run,'
+                   .. " so the workspace cannot be installed with its own pnpm",
+             surface = PNPM_RELEASE_SURFACE }
+  end
+  local install = daukle.exec(root:tool(pick.node), {
+    climb .. derived(context, PNPM_ENTRY), "install", "--frozen-lockfile", "--ignore-scripts",
+    "--config.confirmModulesPurge=false", "--modules-dir", WORKSPACE_MODULES_DIR,
+    "--virtual-store-dir", climb .. derived(context, "migrate-workspace/pnpm-virtual-store"),
+    "--store-dir", climb .. derived(context, "migrate-workspace/pnpm-store"),
+  }, { cwd = context.dir or ".", env = env, capture = true, check = false })
+  if not had_modules then
+    daukle.exec(root:tool(pick.node), { "-e", REMOVE_WORKSPACE_STATE }, { cwd = context.dir or "." })
+  end
+  if install.code == 0 then return nil end
+  local output = (install.stdout or "") .. "\n" .. (install.stderr or "")
+  local refusal = string.match(output, "(ERR_PNPM_[^\r\n]+)")
+  if refusal == nil then
+    error("pnpm install of the workspace failed with code " .. install.code .. ": "
+          .. (string.match(output, "([^\r\n]+)[\r\n%s]*$") or ""), 0)
+  end
+  return { construct = PNPM_LOCK, where = within(context.dir, PNPM_LOCK),
+           why = "does not install the workspace with its own pnpm, so its members' commands cannot be"
+                 .. " resolved: " .. refusal,
+           surface = "NPM-SURFACE.md: " .. FOREIGN_LOCKFILE_ROW }
+end
+
+--- The `name` of the package in `directory`, or nil when it declares none or is not readable JSON.
+local function package_name_in(context, directory)
+  local text = daukle.read(within(context.dir, directory .. "/package.json"))
+  if type(text) == "string" and string.sub(text, 1, 3) == "\239\187\191" then text = string.sub(text, 4) end
+  if string.match(text or "", "^%s*{") == nil then return nil end
+  local name = daukle.json_parse(text).name
+  if type(name) == "string" and name ~= "" then return name end
+  return nil
+end
+
+--- Each addressable member's package name mapped to its directory, for `pnpm --filter <name>`.
+---
+--- @implNote a name two members share is left out: pnpm selects both, and a step runs one.
+local function member_names_of(context, members)
+  local directories, shared = {}, {}
+  for _, directory in ipairs(members) do
+    local name = nested.directory_problem(directory) == nil and package_name_in(context, directory) or nil
+    if name ~= nil then
+      if directories[name] ~= nil then shared[name] = true end
+      directories[name] = directory
+    end
+  end
+  for name in pairs(shared) do directories[name] = nil end
+  return directories
+end
+
+--- The translation of a package, a pnpm workspace member's when `root` is its workspace root.
+local function translation_of(context, root, workspace_members)
+  local where = within(context.dir, "package.json")
+  local member = nil
+  if root ~= nil then
+    member = { keeps_file_range = function(range) return is_inside_workspace(context, root, range) end }
+  end
+  local translation = translate.package(daukle.read(where), where, member, workspace_members)
+  if root ~= nil then
+    translation.root = root
+    translation.config[pnpm_workspace.KEY] = root.instance
+    if translation.config.overrides ~= nil then
+      translation.config.overrides = nil
+      translation.blockers[#translation.blockers + 1] = {
+        construct = '"overrides"', where = where, surface = "NPM-SURFACE.md: " .. translate.SURFACE.overrides,
+        why = "overrides packages in a pnpm workspace member, and pnpm applies overrides only from the"
+              .. " workspace root, so they would not apply" }
+    end
+  end
+  return translation
+end
+
+--- The pnpm workspace a root declares, the members it matches, and its blockers; or, for a member
+--- of a workspace, the members below it, which it hands back so that it never owns their files.
+local function workspace_and_members(context, files, translation)
+  if translation.root ~= nil then
+    return nil, members_below(context, translation.root, files), translation.blockers
+  end
+  local workspace = pnpm_workspace_of(context, files, translation.config)
+  if workspace ~= nil then
+    return workspace, pnpm_workspace.members(workspace, nested_directories(files)), workspace.blockers
+  end
+  if declares_workspaces(context, files) then return nil, {}, nil end
+  return nil, nil, nil
+end
+
 local function run(context)
   local files = file_facts(context)
-  local instances = take_instances(context, files, declares_workspaces(context, files))
-  local answer = run_package(context, files)
+  local root = workspace_root_of(context)
+  local translation = translation_of(context, root)
+  local workspace, members, member_refusals = workspace_and_members(context, files, translation)
+  if workspace ~= nil then translation = translation_of(context, root, member_names_of(context, members)) end
+  local instances = take_instances(context, files, members)
+  if member_refusals ~= nil then
+    for _, refused in ipairs(unplaceable_member_blockers(context, files, members)) do
+      member_refusals[#member_refusals + 1] = refused
+    end
+  end
+  local pnpm = translation.config.pnpm
+  local answer = run_package(context, files, translation, workspace, members)
   local config = answer.manifest and answer.manifest.toolchains[context.instance]
   if config ~= nil then
-    for _, refused in ipairs(nested_script_blockers(context, config, instances, within(context.dir, "package.json"))) do
+    for _, refused in ipairs(nested_script_blockers(context, config, instances, workspace ~= nil and members or nil,
+                                                    within(context.dir, "package.json"))) do
       answer.blockers[#answer.blockers + 1] = refused
     end
+  end
+  if workspace ~= nil and #answer.blockers == 0 then
+    local root, pick = provision(context, config.version)
+    local refused = install_old_workspace(context, root, pick, pnpm, npmrc.env(npmrc_of(context, files).config),
+                                          members)
+    if refused ~= nil then answer.blockers[#answer.blockers + 1] = refused end
   end
   answer.instances = instances
   return answer
 end
 
 --- The old project installed as pnpm installs it, with the release its `packageManager` names.
----
---- @implNote pnpm comes from the registry through the provisioned npm, as corepack would fetch it:
---- the old side is the original tool's own run, which may reach the network as its `npm ci` does.
 local function install_old_with_pnpm(context, root, pick, pnpm, env)
-  daukle.write{ path = "migrate-pnpm/package.json",
-                text = '{ "private": true, "dependencies": { "pnpm": "' .. pnpm .. '" } }\n' }
-  daukle.exec(root:tool(pick.node), { root:path(pick.npm), "install", "--ignore-scripts", "--no-audit", "--no-fund" },
-              { cwd = derived(context, "migrate-pnpm"), env = env })
+  if not install_pnpm(context, root, pick, pnpm, env) then
+    error('pnpm "' .. pnpm .. '" ships no ' .. PNPM_BIN .. " for node to run", 0)
+  end
   daukle.write{ path = "migrate-old/" .. PNPM_LOCK, text = daukle.read(within(context.dir, PNPM_LOCK)) }
-  daukle.exec(root:tool(pick.node), { "../migrate-pnpm/node_modules/pnpm/bin/pnpm.cjs", "install",
+  daukle.exec(root:tool(pick.node), { "../" .. PNPM_ENTRY, "install",
                                       "--frozen-lockfile", "--ignore-scripts", "--store-dir", "pnpm-store" },
               { cwd = derived(context, "migrate-old"), env = env })
 end
 
+local function install_old(context, files, translation, root, pick, env)
+  daukle.write{ path = "migrate-old/package.json", text = daukle.read(within(context.dir, "package.json")) }
+  if is_pnpm_project(files, translation.config) then
+    install_old_with_pnpm(context, root, pick, translation.config.pnpm, env)
+    return
+  end
+  local install = { root:path(pick.npm), "install", "--ignore-scripts" }
+  if files.exists["package-lock.json"] then
+    daukle.write{ path = "migrate-old/package-lock.json",
+                  text = daukle.read(within(context.dir, "package-lock.json")) }
+    install = { root:path(pick.npm), "ci", "--ignore-scripts" }
+  end
+  daukle.exec(root:tool(pick.node), install, { cwd = derived(context, "migrate-old"), env = env })
+end
+
+--- The tree script's arguments for the old side of a workspace's root or member: its modules from
+--- the one install of the original workspace, `run`'s, and the workspace root its links are read
+--- against. Paths climb from the derived `migrate-old`, where the script runs.
+local function old_workspace_tree_arguments(context, workspace_dir)
+  local climb = paths.climb_from(derived(context, "migrate-old"))
+  return { "--modules", climb .. within(context.dir, WORKSPACE_MODULES_DIR),
+           "--workspace", climb .. (workspace_dir or ".") }
+end
+
+--- @implNote neither a workspace's root nor its members install here: each reads its old tree from
+--- the one install of the original workspace the root's `run` made.
 local function build(context)
   local where = within(context.dir, "package.json")
-  local translation = translate.package(daukle.read(where), where)
+  local translation = translation_of(context, workspace_root_of(context))
+  local is_member = translation.root ~= nil
   local files = file_facts(context)
+  local is_workspace_root = not is_member and pnpm_workspace_of(context, files, translation.config) ~= nil
   local env = npmrc.env(npmrc_of(context, files).config)
   translation.candidates = narrowed_by_version_files(context, files, translation.candidates)
   translation.config.version = translation.candidates[1]
@@ -753,23 +1165,23 @@ local function build(context)
     translation.config.version = accepting_version(context, translation.candidates, where,
                                                    within(context.dir, "package-lock.json"), env)
   end
-  local _, unresolved = probe(context, translation.config, env)
-  if unresolved ~= nil then error("npm install failed: " .. unresolved, 0) end
+  if not is_member then
+    local _, unresolved = probe(context, translation.config, env)
+    if unresolved ~= nil then error("npm install failed: " .. unresolved, 0) end
+  end
   local root, pick = provision(context, translation.config.version)
-  daukle.write{ path = "migrate-old/package.json", text = daukle.read(where) }
-  if is_pnpm_project(files, translation.config) then
-    install_old_with_pnpm(context, root, pick, translation.config.pnpm, env)
-  else
-    local install = { root:path(pick.npm), "install", "--ignore-scripts" }
-    if files.exists["package-lock.json"] then
-      daukle.write{ path = "migrate-old/package-lock.json",
-                    text = daukle.read(within(context.dir, "package-lock.json")) }
-      install = { root:path(pick.npm), "ci", "--ignore-scripts" }
+  local tree_argv = { "./" .. tree.SCRIPT_NAME }
+  if is_member or is_workspace_root then
+    local workspace_dir = context.dir
+    if is_member then workspace_dir = translation.root.dir end
+    for _, argument in ipairs(old_workspace_tree_arguments(context, workspace_dir)) do
+      tree_argv[#tree_argv + 1] = argument
     end
-    daukle.exec(root:tool(pick.node), install, { cwd = derived(context, "migrate-old"), env = env })
+  else
+    install_old(context, files, translation, root, pick, env)
   end
   daukle.write{ path = "migrate-old/" .. tree.SCRIPT_NAME, text = tree.SCRIPT }
-  daukle.exec(root:tool(pick.node), { "./" .. tree.SCRIPT_NAME }, { cwd = derived(context, "migrate-old") })
+  daukle.exec(root:tool(pick.node), tree_argv, { cwd = derived(context, "migrate-old") })
   if translation.config[published.KEY] ~= nil then
     daukle.write{ path = "migrate-old/" .. pack.SCRIPT_NAME, text = pack.SCRIPT }
     local climb = paths.climb_from(context.dir)

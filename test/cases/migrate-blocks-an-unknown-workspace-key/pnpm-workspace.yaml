@@ -1,0 +1,6 @@
+packages:
+  - 'packages/*'
+  - '!packages/{x,y}'
+
+allowBuilds:
+  esbuild: true

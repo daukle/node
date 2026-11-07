@@ -1,0 +1,9 @@
+[toolchains.node.workspace]
+[toolchains.node.workspace.members]
+"packages/a" = "node-packages-a"
+"packages/b" = "node-packages-b"
+[toolchains.node-packages-b]
+dir = "packages/b"
+workspace = "node"
+a = "workspace:*"
+bin = "semver"

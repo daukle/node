@@ -3,13 +3,15 @@ local expect = daukle.require("tests/expect")
 
 local DECLARED = { build = true, test = true, start = true }
 
+local MEMBERS = { a = "packages/a" }
+
 local function steps(body, wanted)
   return { name = "translates " .. body, check = function()
     local parsed, reason = command_line.parse(body)
     if parsed == nil then return "refused: " .. reason end
     local out = {}
     for index, words in ipairs(parsed.segments) do
-      local step, why = command_line.step_of(words, DECLARED)
+      local step, why = command_line.step_of(words, DECLARED, MEMBERS)
       if step == nil then return "segment " .. index .. " refused: " .. why end
       out[index] = step
     end
@@ -22,7 +24,7 @@ local function refuses(body, needle)
     local parsed, reason = command_line.parse(body)
     if parsed ~= nil then
       for _, words in ipairs(parsed.segments) do
-        local step, why = command_line.step_of(words, DECLARED)
+        local step, why = command_line.step_of(words, DECLARED, MEMBERS)
         if step == nil then reason = why break end
       end
       if reason == nil then return "wanted a refusal" end
@@ -52,6 +54,17 @@ return {
   refuses("pnpm lint", 'runs "lint", which is not a declared script'),
   refuses("pnpm run build --watch", 'passes arguments to "build" through pnpm'),
   refuses("CI=1 pnpm build", 'sets environment variables for "pnpm"'),
+  steps("pnpm --filter a build", { { script = "build", package = "packages/a" } }),
+  steps("pnpm --filter=a build", { { script = "build", package = "packages/a" } }),
+  steps("pnpm --filter a run build", { { script = "build", package = "packages/a" } }),
+  refuses("pnpm --filter zzz build", 'pnpm --filter zzz'),
+  refuses("pnpm -r build", 'pnpm -r'),
+  refuses("pnpm --recursive build", 'pnpm --recursive'),
+  refuses("pnpm --filter ./packages/a build", 'pnpm --filter ./packages/a'),
+  refuses("pnpm --filter a... build", 'pnpm --filter a...'),
+  refuses("pnpm --filter ^a build", 'shell'),
+  refuses("pnpm --filter a build --watch", 'passes arguments to "build"'),
+  refuses("pnpm --filter a", "nothing to run"),
   steps('eslint "src dir"', { { command = "eslint", args = { "src dir" } } }),
   steps("eslint 'src'", { { command = "eslint", args = { "src" } } }),
   steps("rm -rf dist", { { remove = { "dist" }, recursive = true, force = true } }),

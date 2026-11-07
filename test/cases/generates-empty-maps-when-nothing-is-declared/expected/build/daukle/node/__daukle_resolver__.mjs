@@ -1,7 +1,7 @@
 import Module, { createRequire, isBuiltin, registerHooks } from "node:module";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { pathToFileURL, fileURLToPath } from "node:url";
-import { dirname, join, resolve as resolvePath } from "node:path";
+import { dirname, join, resolve as resolvePath, sep } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const anchor = join(here, "__daukle_anchor__.js");
@@ -62,10 +62,47 @@ function namesThisPackage(specifier) {
   return ownName !== null && (specifier === ownName || specifier.startsWith(ownName + "/"));
 }
 
+const inWorkspace = false;
+const ownModules = realModules(here);
+const modulesByDirectory = new Map();
+
+function realModules(directory) {
+  try {
+    return realpathSync(join(directory, "node_modules"));
+  } catch {
+    return null;
+  }
+}
+
+function isInsideProject(directory) {
+  return directory === projectRoot || directory.startsWith(projectRoot + sep);
+}
+
+/**
+ * Whether the nearest node_modules above the importing file is another workspace project's.
+ *
+ * @implNote each project of a pnpm workspace has modules of its own, so a sibling's file, or a
+ * package in the workspace's virtual store, resolves from where it lies, as node would.
+ */
+function belongsToAnotherWorkspaceProject(parentURL) {
+  if (!inWorkspace) return false;
+  for (let directory = dirname(fileURLToPath(parentURL)); isInsideProject(directory);
+       directory = dirname(directory)) {
+    let modules = modulesByDirectory.get(directory);
+    if (modules === undefined) {
+      modules = realModules(directory);
+      modulesByDirectory.set(directory, modules);
+    }
+    if (modules !== null) return modules !== ownModules;
+    if (directory === projectRoot) return false;
+  }
+  return false;
+}
+
 function belongsToThisProject(parentURL) {
   if (typeof parentURL !== "string") return false;
   if (!parentURL.startsWith(projectUnder)) return false;
-  return !parentURL.startsWith(installedUnder);
+  return !parentURL.startsWith(installedUnder) && !belongsToAnotherWorkspaceProject(parentURL);
 }
 
 // Iterated rather than indexed, because the shape is not one thing: node

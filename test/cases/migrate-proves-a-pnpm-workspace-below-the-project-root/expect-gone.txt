@@ -1,0 +1,7 @@
+ui/node_modules
+ui/pnpm-store
+ui/packages/a/node_modules
+ui/packages/b/node_modules
+node_modules
+pnpm-store
+build/daukle/node-ui/migrate-old/node_modules

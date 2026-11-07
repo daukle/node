@@ -1,0 +1,7 @@
+[toolchains.node.workspace]
+[toolchains.node.workspace.members]
+"packages/a" = "node-packages-a"
+"packages/a/b" = "node-packages-a-b"
+[toolchains.node-packages-a]
+dir = "packages/a"
+[toolchains.node-packages-a-b]

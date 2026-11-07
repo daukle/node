@@ -252,9 +252,12 @@ one of its rows.
   every host.
 - **`build` is the proof.** It installs the OLD project in `migrate-old/` (`npm ci` when a lockfile
   exists) and writes its tree; the proof task is `node:tree` on the migrated project, and the two
-  are compared as bytes. A project with a lockfile fails whenever a range has moved since it was
-  written, which is the cost of refusing a committed lockfile. Core prints that the new build
-  differs and both digests; it does not list the differing packages, and both trees are on stdout.
+  are compared as bytes. A pnpm workspace's root and members install nothing in `build`: each
+  reads its old tree from the one install of the original workspace the root's `run` made, and the
+  root's `node:tree` installs the workspace rebuilt from `daukle.toml` in its `tree-workspace/`. A
+  project with a lockfile fails whenever a range has moved since it was written, which is the cost
+  of refusing a committed lockfile. Core prints that the new build differs, the tree lines only one
+  side has, and both digests.
 - **A node version file narrows the node** (`D-242`): `.nvmrc` and `.node-version` are read with
   nvm's meaning (`v22` is the newest 22.x, `24.22.1` exactly that) through `lib/engines.lua`'s
   range reader, intersected with `engines`, and the file is owned. An alias (`lts/*`, `node`) is a

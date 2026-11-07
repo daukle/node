@@ -6,12 +6,15 @@ local pins = daukle.require("lib/pins")
 local pnpm_pins = daukle.require("lib/pnpm_pins")
 local published = daukle.require("lib/published")
 local nested = daukle.require("lib/nested")
+local pnpm_workspace = daukle.require("lib/pnpm_workspace")
 
 local KNOWN_KEYS = { version = true, entry = true, scripts = true, type = true,
                      [package_fields.KEY] = true, [pins.KEY] = true, [pnpm_pins.KEY] = true, [published.KEY] = true,
-                     [nested.KEY] = true }
+                     [nested.KEY] = true, [pnpm_workspace.KEY] = true }
 
 local MOVED_TO_NPM = { packages = true, devPackages = true }
+
+local WORKSPACE_PREFIXES = { "workspace:", "catalog:", "file:" }
 
 --- The fields the generated package.json writes itself, which `packageFields` cannot name.
 local WRITTEN = { [links.MARKER_KEY] = true, type = true, private = true, dependencies = true,
@@ -22,13 +25,20 @@ local function config_of(context)
   return context.config
 end
 
+--- Whether the block is a pnpm workspace member's, whose `workspace` names its root's instance.
+local function is_workspace_member(config)
+  return type(config[pnpm_workspace.KEY]) == "string"
+end
+
+--- @implNote a workspace member keeps its ranges in its own block, since the pins are the root's
+--- alone and cover every member (spec 4.2).
 local function reject_unknown_keys(config)
   for key in pairs(config) do
-    if MOVED_TO_NPM[key] then
+    if MOVED_TO_NPM[key] and not is_workspace_member(config) then
       error(string.format('"%s" moved to [toolchains.npm] in daukle/node 4, where daukle/npm pins'
                           .. ' the closure it resolves to: an install resolves no range', key), 0)
     end
-    if KNOWN_KEYS[key] == nil then
+    if KNOWN_KEYS[key] == nil and not MOVED_TO_NPM[key] then
       error(string.format('"%s" is not a key this toolchain knows: a misspelled key would'
                           .. ' otherwise be ignored and build the wrong thing silently', key), 0)
     end
@@ -96,13 +106,20 @@ end
      what could need escaping is refused at the edge instead. Every npm name and
      every range a user can mean is inside this set; a value outside it would
      otherwise produce a file npm parses as something else. ]]
-local function checked_range(name, range, key)
+local function checked_range(name, range, key, in_workspace)
   if type(range) ~= "string" then
     error(string.format('%s."%s" must be a version range as a string, not a %s',
                         key, name, type(range)), 0)
   end
   if range == "" then
     error(string.format('%s."%s" is empty, and npm has no empty range', key, name), 0)
+  end
+  local lowered = string.lower(range)
+  for _, prefix in ipairs(WORKSPACE_PREFIXES) do
+    if not in_workspace and string.sub(lowered, 1, #prefix) == prefix then
+      error(string.format('%s."%s" is "%s", which only pnpm resolves, inside a workspace: this block'
+                          .. ' carries no "%s"', key, name, range, pnpm_workspace.KEY), 0)
+    end
   end
   if string.match(range, '^[%w%s%.%-%+%*|<>=~^%(%)/:#@]+$') == nil then
     error(string.format('%s."%s" is not a version range this toolchain writes: "%s" holds a'
@@ -112,11 +129,29 @@ local function checked_range(name, range, key)
   return range
 end
 
-local function checked_ranges(names, ranges, key)
+local function checked_ranges(names, ranges, key, in_workspace)
   for index = 1, #names do
     local problem = package_name_problem(names[index])
     if problem ~= nil then error(problem, 0) end
-    checked_range(names[index], ranges[names[index]], key)
+    checked_range(names[index], ranges[names[index]], key, in_workspace)
+  end
+end
+
+local function sorted_names(map)
+  local names = {}
+  for name in pairs(map) do names[#names + 1] = name end
+  table.sort(names)
+  return names
+end
+
+--- A workspace member's own ranges, checked: `packages` and `devPackages`, each a map.
+local function check_member_ranges(config)
+  for _, pair in ipairs({ { "packages", "dependencies" }, { "devPackages", "devDependencies" } }) do
+    local map = config[pair[1]]
+    if map ~= nil then
+      if type(map) ~= "table" then error('"' .. pair[1] .. '" must be a table of package name to range', 0) end
+      checked_ranges(sorted_names(map), map, pair[2], true)
+    end
   end
 end
 
@@ -214,12 +249,93 @@ local function published_of(config)
   return value
 end
 
+local WORKSPACE_KEYS = { members = true, catalog = true, catalogs = true }
+
+local function is_instance_name(name)
+  return string.match(name, "^[%w][%w%.%_%-]*$") ~= nil
+end
+
+local function workspace_problem(text)
+  return '"' .. pnpm_workspace.KEY .. '" ' .. text
+end
+
+--- A catalog as read from daukle.toml: package name to range, each a one-line string.
+local function checked_catalog(catalog, label)
+  if type(catalog) ~= "table" then error(workspace_problem(label .. " must be a table of package name to range"), 0) end
+  for name, range in pairs(catalog) do
+    if type(name) ~= "string" or type(range) ~= "string" or string.find(name .. range, "%c") then
+      error(workspace_problem(label .. '."' .. tostring(name) .. '" must be a range as a one-line string'), 0)
+    end
+  end
+  return catalog
+end
+
+--- A workspace root's `workspace`: its members, each `{ dir, instance }` sorted by the directory
+--- below the root, and its catalogs.
+local function workspace_of(config)
+  local value = config[pnpm_workspace.KEY]
+  if value == nil or type(value) == "string" then return nil end
+  if type(value) ~= "table" then
+    error(workspace_problem("is a member's root instance as a string, or a root's members and catalogs as a table"), 0)
+  end
+  for key in pairs(value) do
+    if not WORKSPACE_KEYS[key] then error(workspace_problem('holds "' .. tostring(key) .. '", which is not "members", "catalog" or "catalogs"'), 0) end
+  end
+  if type(value.members) ~= "table" then
+    error(workspace_problem('needs "members", each member\'s directory mapped to its instance'), 0)
+  end
+  local members = {}
+  for _, directory in ipairs(sorted_names(value.members)) do
+    local instance = value.members[directory]
+    if type(directory) ~= "string" or not is_project_path(directory) or string.find(directory, "%c") then
+      error(workspace_problem('"members" names "' .. tostring(directory) .. '", which is not a directory inside the project'), 0)
+    end
+    if type(instance) ~= "string" or not is_instance_name(instance) then
+      error(workspace_problem('"members"."' .. directory .. '" is "' .. tostring(instance) .. '", which is not an instance name'), 0)
+    end
+    members[#members + 1] = { dir = directory, instance = instance }
+  end
+  local catalogs = nil
+  if value.catalogs ~= nil then
+    if type(value.catalogs) ~= "table" then error(workspace_problem('"catalogs" must be a table of catalog name to catalog'), 0) end
+    catalogs = {}
+    for name, catalog in pairs(value.catalogs) do catalogs[name] = checked_catalog(catalog, 'catalogs."' .. tostring(name) .. '"') end
+  end
+  return { members = members, catalog = value.catalog ~= nil and checked_catalog(value.catalog, "catalog") or nil,
+           catalogs = catalogs }
+end
+
+--- A member's `workspace`, the instance of the workspace root it installs through.
+local function workspace_root_of(config)
+  local value = config[pnpm_workspace.KEY]
+  if type(value) ~= "string" then return nil end
+  if not is_instance_name(value) then
+    error(workspace_problem('names "' .. value .. '", which is not an instance name'), 0)
+  end
+  return value
+end
+
+--- A workspace member's own ranges, which its rendered package.json declares for pnpm to install.
+local function member_packages(config, key)
+  local map = config[key] or {}
+  return sorted_names(map), map
+end
+
+--- @implNote a block carrying `workspace`, a root's or a member's, accepts `workspace:`, `catalog:`
+--- and `file:` pins, which only pnpm resolves, inside the workspace; any other block refuses them.
 local function read(context)
   local config = config_of(context)
   reject_unknown_keys(config)
   local pinned, pnpm_lock = pinned_of(config)
-  checked_ranges(pinned.packages, pinned.package_ranges, "dependencies")
-  checked_ranges(pinned.dev_packages, pinned.dev_ranges, "devDependencies")
+  local in_workspace = config[pnpm_workspace.KEY] ~= nil
+  checked_ranges(pinned.packages, pinned.package_ranges, "dependencies", in_workspace)
+  checked_ranges(pinned.dev_packages, pinned.dev_ranges, "devDependencies", in_workspace)
+  local workspace_root = workspace_root_of(config)
+  if workspace_root ~= nil then
+    check_member_ranges(config)
+    pinned.packages, pinned.package_ranges = member_packages(config, "packages")
+    pinned.dev_packages, pinned.dev_ranges = member_packages(config, "devPackages")
+  end
   local declared_scripts = scripts.read(config)
   local field_names, fields = package_fields.checked(config, WRITTEN)
   return {
@@ -238,6 +354,8 @@ local function read(context)
     pnpm_lock = pnpm_lock,
     published = published_of(config),
     nested = nested.read(config),
+    workspace = workspace_of(config),
+    workspace_root = workspace_root,
   }
 end
 

@@ -1,0 +1,1 @@
+"$DAUKLE" clean

@@ -18,6 +18,7 @@ local pack = daukle.require("lib/pack")
 local published = daukle.require("lib/published")
 local pnpm_mirror = daukle.require("lib/pnpm_mirror")
 local nested = daukle.require("lib/nested")
+local pnpm_workspace = daukle.require("lib/pnpm_workspace")
 
 daukle.toolchain{
   name = "node",
@@ -26,7 +27,8 @@ daukle.toolchain{
     runtimes.for_host{ os = context.host.os, arch = context.host.arch, version = spec.version }
     local files = {
       ["package.json"] = settings.package_json(spec),
-      [runners.RESOLVER_NAME] = runners.resolver_for(spec.type, settings.own_name_of(spec)),
+      [runners.RESOLVER_NAME] = runners.resolver_for(spec.type, settings.own_name_of(spec),
+                                                     spec.workspace ~= nil or spec.workspace_root ~= nil),
       [runners.BIN_RUNNER_NAME] = runners.BIN_RUNNER,
       [runners.REMOVER_NAME] = runners.REMOVER,
       [runners.ECHO_NAME] = runners.ECHO,
@@ -34,7 +36,9 @@ daukle.toolchain{
       [links.SCRIPT_NAME] = links.SCRIPT,
       [npm_launcher.SCRIPT_NAME] = npm_launcher.SCRIPT,
       [nested.PLACEMENTS_NAME] = nested.placements_json(spec.nested),
+      [links.WORKSPACE_NAME] = links.workspace_json(spec),
     }
+    if spec.workspace ~= nil then files[links.WORKSPACE_FILE_NAME] = pnpm_workspace.render(spec.workspace) end
     if spec.lock ~= nil then files["package-lock.json"] = spec.lock.text end
     if spec.pnpm_lock ~= nil then
       files["pnpm-lock.yaml"] = spec.pnpm_lock.text
@@ -96,27 +100,35 @@ local function through_launcher(npm_argv)
   return npm_argv
 end
 
---- Installs exactly the pinned closure, with npm reaching no network: every tarball this host
---- installs is fetched by daukle against its sha256 and handed to npm's cache, which npm keys
---- by the lockfile's integrity, so a tarball missing from it fails ENOTCACHED naming it.
---- Installs a pnpm project's pinned closure with its pinned pnpm, through a loopback mirror of
---- the tarballs daukle fetched, so `--frozen-lockfile` reaches no network (D-251).
-local function install_with_pnpm(context, spec, root, pick)
-  local lock = spec.pnpm_lock
+--- The pinned pnpm, with the mirror's map of the tarballs daukle fetched written beside it.
+local function pnpm_behind_mirror(context, lock)
   local fetched = {}
   for _, entry in ipairs(pins.for_host(lock.entries, context.host)) do
     fetched[#fetched + 1] = { url = entry.url, file = daukle.artifact{ url = entry.url, sha256 = entry.sha256, as = entry.as } }
   end
   daukle.write{ path = pnpm_mirror.MAP_NAME, text = pnpm_mirror.map_json(fetched) }
   local pnpm_root = daukle.provision{ url = lock.pnpm.url, sha256 = lock.pnpm.sha256, as = "pnpm " .. lock.pnpm.version }
-  daukle.exec(root:tool(pick.node), { "./" .. pnpm_mirror.SCRIPT_NAME, pnpm_mirror.MAP_NAME,
-                                      pnpm_root:path("package/bin/pnpm.cjs"), "install", "--frozen-lockfile",
-                                      "--store-dir", "pnpm-store" })
+  return pnpm_root:path("package/bin/pnpm.cjs")
+end
+
+--- Installs a pnpm project's pinned closure with its pinned pnpm, through a loopback mirror of
+--- the tarballs daukle fetched, so `--frozen-lockfile` reaches no network (D-251).
+local function install_with_pnpm(context, spec, root, pick)
+  local pnpm = pnpm_behind_mirror(context, spec.pnpm_lock)
+  daukle.exec(root:tool(pick.node), { "./" .. pnpm_mirror.SCRIPT_NAME, pnpm_mirror.MAP_NAME, pnpm, "install",
+                                      "--frozen-lockfile", "--store-dir", "pnpm-store" })
   return root, pick
 end
 
+--- Installs exactly the pinned closure, with npm reaching no network: every tarball this host
+--- installs is fetched by daukle against its sha256 and handed to npm's cache, which npm keys
+--- by the lockfile's integrity, so a tarball missing from it fails ENOTCACHED naming it.
+---
+--- @implNote a workspace member installs nothing of its own, whatever task asks: the one install
+--- of the workspace is its root's `node:install`, which a member's runs.
 local function install_packages(context, spec)
   local root, pick = provision_node(context, spec)
+  if spec.workspace_root ~= nil then return root, pick end
   if spec.pnpm_lock ~= nil then return install_with_pnpm(context, spec, root, pick) end
   local node, npm = root:tool(pick.node), root:path(pick.npm)
   if spec.lock == nil then
@@ -144,9 +156,96 @@ local function declares_prepare(spec)
   return false
 end
 
-local function install_and_link(context, spec)
-  local root, pick = install_packages(context, spec)
+local function package_root(context)
+  return string.match(context.root, "^%.%./%.%./%.%./(.+)$") or "."
+end
+
+local function derived_from_package_root(context)
+  return paths.climb_from(package_root(context)) .. "build/daukle/" .. context.toolchain.name
+end
+
+--- Places this instance's generated files at its package root and links its node_modules there.
+local function place_at_package_root(context, root, pick)
   daukle.exec(root:tool(pick.node), { "./" .. links.SCRIPT_NAME, context.root })
+end
+
+local function run_task_of(name)
+  local ok, why = daukle.run_task(name)
+  if not ok then error(name .. " failed: " .. tostring(why), 0) end
+end
+
+local function place_member(member)
+  local ok, why = daukle.run_task(member.instance .. ":place")
+  if ok then return end
+  error(string.format('workspace.members."%s" names the instance "%s", and its place task failed: %s',
+                      member.dir, member.instance, tostring(why)), 0)
+end
+
+--- This member's directory below its workspace root, as the root's `workspace.members` maps it;
+--- a member the root does not list is refused, since pnpm installed nothing for it.
+local function member_dir_in_root(context, spec)
+  local placements = daukle.json_parse(daukle.read("build/daukle/" .. spec.workspace_root .. "/" .. links.WORKSPACE_NAME))
+  local dir = (placements.members or {})[context.toolchain.name]
+  if type(dir) == "string" then return dir end
+  error(string.format('this block names "%s" as its workspace root, and that root\'s workspace.members does'
+                      .. ' not list "%s", so the workspace install placed nothing for it', spec.workspace_root,
+                      context.toolchain.name), 0)
+end
+
+local function refuse_an_unlisted_member(context, spec)
+  member_dir_in_root(context, spec)
+end
+
+local function refuse_a_workspace_without_pins(spec)
+  if spec.pnpm_lock ~= nil then return end
+  error("a pnpm workspace installs the closure daukle/pnpm pins, and this block carries no pins: resolve"
+        .. " them with daukle/pnpm first", 0)
+end
+
+--- The one install of a pnpm workspace, run from its root's own directory once every project's
+--- `package.json`, the workspace file and the lockfile are placed there, with everything pnpm
+--- writes kept under `build/`: each project's modules in its own `build/daukle/node_modules`, the
+--- virtual store and the store in the root's derived directory. Every member is placed and linked
+--- by it, so a member's own modules resolve when only a sibling's task ran this install.
+---
+--- @implNote a member is linked before the install, not after it: its `:place` runs at most once
+--- per invocation, and the link names a directory pnpm then fills.
+---
+--- @implNote the root is linked before the install as well as after it: pnpm 10 and 11 write
+--- `node_modules/.pnpm-workspace-state-v1.json` at the workspace root whatever `--modules-dir`
+--- says, and exit 254 when that `node_modules` is a link whose target is gone, as after
+--- `daukle clean`; linked first, the file lands under `build/`.
+---
+--- @implNote `confirmModulesPurge=false` because pnpm 10.34.9 and 11.25.0, finding a modules
+--- directory laid out for another virtual store or release, ask before purging it and without a
+--- TTY exit 1 with ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY instead (measured in Docker by moving
+--- `--virtual-store-dir` between two installs; 8.9.2 prompts and proceeds).
+local function install_workspace(context, spec, root, pick)
+  refuse_a_workspace_without_pins(spec)
+  for _, member in ipairs(spec.workspace.members) do place_member(member) end
+  place_at_package_root(context, root, pick)
+  local derived = derived_from_package_root(context)
+  local pnpm = pnpm_behind_mirror(context, spec.pnpm_lock)
+  daukle.exec(root:tool(pick.node), {
+    derived .. "/" .. pnpm_mirror.SCRIPT_NAME, derived .. "/" .. pnpm_mirror.MAP_NAME, pnpm, "install",
+    "--frozen-lockfile", "--config.confirmModulesPurge=false", "--modules-dir", links.WORKSPACE_MODULES_DIR,
+    "--virtual-store-dir", derived .. "/pnpm-virtual-store", "--store-dir", derived .. "/pnpm-store",
+  }, { cwd = package_root(context) })
+  place_at_package_root(context, root, pick)
+end
+
+local function install_and_link(context, spec)
+  if spec.workspace ~= nil then
+    local root, pick = provision_node(context, spec)
+    install_workspace(context, spec, root, pick)
+    return root, pick
+  end
+  if spec.workspace_root ~= nil then
+    run_task_of(spec.workspace_root .. ":install")
+    refuse_an_unlisted_member(context, spec)
+  end
+  local root, pick = install_packages(context, spec)
+  place_at_package_root(context, root, pick)
   return root, pick
 end
 
@@ -156,6 +255,14 @@ daukle.task{
     local spec = settings.read(context)
     install_and_link(context, spec)
     run_prepare(context, spec)
+  end,
+}
+
+daukle.task{
+  name = "node:place",
+  run = function(context)
+    local root, pick = provision_node(context, settings.read(context))
+    place_at_package_root(context, root, pick)
   end,
 }
 
@@ -193,24 +300,66 @@ daukle.task{
   run = function() end,
 }
 
+--- The derived directory a workspace root's tree installs the workspace in, rebuilt from what
+--- daukle.toml renders.
+local TREE_WORKSPACE = "tree-workspace"
+
+--- The workspace rebuilt in `TREE_WORKSPACE` from the rendered root and member package.json files,
+--- the rendered workspace file and the pinned lockfile, and installed there through the mirror.
+---
+--- @implNote rebuilt rather than installed in the project's tree, because the proof runs while the
+--- author's own package.json files are still at their paths; and its own workspace file is the
+--- nearest one pnpm finds, so pnpm never walks up to the project's. A rebuilt member holds no
+--- code, which a dependency tree does not read, so scripts are ignored.
+local function install_tree_workspace(context, spec, root, pick)
+  refuse_a_workspace_without_pins(spec)
+  daukle.write{ path = TREE_WORKSPACE .. "/package.json", text = settings.package_json(spec) }
+  daukle.write{ path = TREE_WORKSPACE .. "/" .. pnpm_workspace.NAME, text = pnpm_workspace.render(spec.workspace) }
+  daukle.write{ path = TREE_WORKSPACE .. "/pnpm-lock.yaml", text = spec.pnpm_lock.text }
+  for _, member in ipairs(spec.workspace.members) do
+    local generated = daukle.read("build/daukle/" .. member.instance .. "/package.json")
+    if generated == nil then
+      error(string.format('workspace.members."%s" names the instance "%s", which generated no package.json',
+                          member.dir, member.instance), 0)
+    end
+    daukle.write{ path = TREE_WORKSPACE .. "/" .. member.dir .. "/package.json", text = generated }
+  end
+  local pnpm = pnpm_behind_mirror(context, spec.pnpm_lock)
+  daukle.exec(root:tool(pick.node), {
+    "../" .. pnpm_mirror.SCRIPT_NAME, "../" .. pnpm_mirror.MAP_NAME, pnpm, "install", "--frozen-lockfile",
+    "--ignore-scripts", "--config.confirmModulesPurge=false", "--store-dir", "../pnpm-store",
+  }, { cwd = "build/daukle/" .. context.toolchain.name .. "/" .. TREE_WORKSPACE })
+end
+
+local function write_tree(root, pick, modules, workspace)
+  daukle.exec(root:tool(pick.node), { "./" .. tree.SCRIPT_NAME, "--modules", modules, "--workspace", workspace })
+end
+
 --[[ @implNote the migration proof runs before core moves the old package.json
-     aside, so tree installs on its own instead of depending on node:install ]]
+     aside, so tree installs on its own instead of depending on node:install.
+     A workspace member reads its projects' modules from its root's rebuilt
+     workspace, which the root's tree installs. ]]
 daukle.task{
   name = "node:tree",
   run = function(context)
     local spec = settings.read(context)
+    if spec.workspace ~= nil then
+      local root, pick = provision_node(context, spec)
+      install_tree_workspace(context, spec, root, pick)
+      write_tree(root, pick, TREE_WORKSPACE .. "/node_modules", TREE_WORKSPACE)
+      return
+    end
+    if spec.workspace_root ~= nil then
+      run_task_of(spec.workspace_root .. ":tree")
+      local workspace = "../" .. spec.workspace_root .. "/" .. TREE_WORKSPACE
+      local root, pick = provision_node(context, spec)
+      write_tree(root, pick, workspace .. "/" .. member_dir_in_root(context, spec) .. "/node_modules", workspace)
+      return
+    end
     local root, pick = install_packages(context, spec)
     daukle.exec(root:tool(pick.node), { "./" .. tree.SCRIPT_NAME })
   end,
 }
-
-local function package_root(context)
-  return string.match(context.root, "^%.%./%.%./%.%./(.+)$") or "."
-end
-
-local function derived_from_package_root(context)
-  return paths.climb_from(package_root(context)) .. "build/daukle/" .. context.toolchain.name
-end
 
 --[[ @implNote --import is resolved against the working directory, which is the
      package root here, so the resolver is named relative to it and starts with
@@ -295,9 +444,15 @@ end
 
 local run_step_list
 
---- The task of a nested package's own instance, named as core names an instance it migrated:
---- `node-<dir>` below the project, every `/` a `-` (D-248).
-local function nested_task_name(context, step)
+--- The task of a nested package's own instance: the instance a workspace's `members` maps the
+--- directory to, else as core names an instance it migrated, `node-<dir>` below the project with
+--- every `/` a `-` (D-248).
+local function nested_task_name(context, spec, step)
+  for _, member in ipairs(spec.workspace and spec.workspace.members or {}) do
+    if member.dir == step.package then
+      return member.instance .. ":" .. scripts.task_name_of(step.name)
+    end
+  end
   local root = package_root(context)
   local directory = root == "." and step.package or (root .. "/" .. step.package)
   return "node-" .. (string.gsub(directory, "/", "-")) .. ":" .. scripts.task_name_of(step.name)
@@ -306,7 +461,7 @@ end
 --- Runs a nested package's script as that package's own task, keeping why it failed for the
 --- script's error, since a step reports only an exit code.
 local function run_nested_script(context, spec, step)
-  local ok, why = daukle.run_task(nested_task_name(context, step))
+  local ok, why = daukle.run_task(nested_task_name(context, spec, step))
   if ok then return 0 end
   spec.nested_failure = why
   return 1

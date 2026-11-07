@@ -1,0 +1,10 @@
+build/daukle/node-ui/migrate-old/dependency-tree.txt debug debug@4.3.4
+build/daukle/node-ui/migrate-old/dependency-tree.txt .pnpm ms@2.1.2
+build/daukle/node-ui/dependency-tree.txt debug debug@4.3.4
+build/daukle/node-ui/dependency-tree.txt .pnpm ms@2.1.2
+build/daukle/node-ui-packages-a/migrate-old/dependency-tree.txt ms ms@2.1.3
+build/daukle/node-ui-packages-a/dependency-tree.txt ms ms@2.1.3
+build/daukle/node-ui-packages-b/migrate-old/dependency-tree.txt a link:packages/a
+build/daukle/node-ui-packages-b/migrate-old/dependency-tree.txt semver semver@7.6.3
+build/daukle/node-ui-packages-b/dependency-tree.txt a link:packages/a
+build/daukle/node-ui-packages-b/dependency-tree.txt semver semver@7.6.3

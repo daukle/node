@@ -1,0 +1,1 @@
+workspace.members."packages/b" names the instance "node-b", and its place task failed

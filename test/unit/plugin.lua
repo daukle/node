@@ -9,9 +9,10 @@ local SUITES = {
   npm_errors_test = daukle.require("tests/npm_errors_test"),
   npmrc_test = daukle.require("tests/npmrc_test"),
   frontend_pom_test = daukle.require("tests/frontend_pom_test"),
+  pnpm_workspace_test = daukle.require("tests/pnpm_workspace_test"),
 }
 local SUITE_ORDER = { "engines_test", "command_line_test", "translate_test", "npm_errors_test", "npmrc_test",
-                     "frontend_pom_test" }
+                     "frontend_pom_test", "pnpm_workspace_test" }
 
 daukle.task{
   name = "unit:test",

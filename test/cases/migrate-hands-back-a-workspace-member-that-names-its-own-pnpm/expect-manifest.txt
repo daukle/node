@@ -1,0 +1,5 @@
+[toolchains.node.workspace]
+[toolchains.node.workspace.members]
+pkg = "node-pkg"
+[toolchains.node-pkg]
+dir = "pkg"

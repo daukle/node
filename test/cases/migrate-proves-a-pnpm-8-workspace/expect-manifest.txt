@@ -1,0 +1,3 @@
+"packages/a" = "node-packages-a"
+"packages/b" = "node-packages-b"
+[toolchains.pnpm]

@@ -1,0 +1,2 @@
+"ms@file:ms-local.tgz" resolves to {integrity: 
+not to a registry tarball by its integrity

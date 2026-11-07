@@ -91,7 +91,15 @@ local function is_local_path(range)
               or string.match(lowered, "%.tar$")) ~= nil
 end
 
-local function dependency_map(package, key, where, blockers)
+--- Whether a workspace member keeps `range` as written, for pnpm to resolve inside the workspace:
+--- a `workspace:` or `catalog:` range, or a `file:` range naming a directory the member accepts.
+local function is_kept_by_member(member, range)
+  if member == nil or type(range) ~= "string" then return false end
+  if workspace_protocol_of(range) ~= nil then return true end
+  return string.sub(string.lower(range), 1, 5) == "file:" and member.keeps_file_range(range)
+end
+
+local function dependency_map(package, key, where, blockers, member)
   local map = package[key]
   if map == nil then return nil end
   if type(map) ~= "table" or #map > 0 then
@@ -106,6 +114,9 @@ local function dependency_map(package, key, where, blockers)
     local protocol = type(range) == "string" and workspace_protocol_of(range) or nil
     if name_problem ~= nil then
       blocker(blockers, key .. '."' .. name .. '"', where, name_problem, SURFACE.dependencies)
+    elseif is_kept_by_member(member, range) then
+      out[name] = range
+      any = true
     elseif type(range) == "string" and is_local_path(range) then
       blocker(blockers, key .. '."' .. name .. '"', where, string.format('is "%s", a local path'
               .. ' npm would resolve against the generated package.json\'s directory rather than'
@@ -136,7 +147,7 @@ local function is_paired(name, declared)
   return base ~= nil and declared[base] ~= nil
 end
 
-local function translated_script(name, body, declared, where, blockers)
+local function translated_script(name, body, declared, where, blockers, workspace_members)
   local construct = 'scripts."' .. name .. '"'
   if LIFECYCLE[name] then
     blocker(blockers, construct, where, "is an npm lifecycle script, run on an event daukle has"
@@ -164,7 +175,7 @@ local function translated_script(name, body, declared, where, blockers)
   end
   local steps = {}
   for index, words in ipairs(parsed.segments) do
-    local step, why = command_line.step_of(words, declared)
+    local step, why = command_line.step_of(words, declared, workspace_members)
     if step == nil then
       blocker(blockers, construct, where, why, SURFACE.shell)
       return nil
@@ -179,7 +190,7 @@ local function translated_script(name, body, declared, where, blockers)
   return steps
 end
 
-local function translated_scripts(package, where, blockers)
+local function translated_scripts(package, where, blockers, workspace_members)
   local map = package.scripts
   if map == nil then return nil end
   if type(map) ~= "table" or #map > 0 then
@@ -194,7 +205,7 @@ local function translated_scripts(package, where, blockers)
               .. ' the same daukle task "node:%s"', tasks[task], name, task), SURFACE.scripts)
     else
       tasks[task] = name
-      local step = translated_script(name, map[name], map, where, blockers)
+      local step = translated_script(name, map[name], map, where, blockers, workspace_members)
       if step ~= nil then out[name] = step any = true end
     end
   end
@@ -327,7 +338,11 @@ local function pnpm_release_of(package_manager)
          or string.match(package_manager, "^pnpm@(%d+%.%d+%.%d+)%+sha%d+%.[%x]+$")
 end
 
-local function package(text, where)
+--- @param member table|nil for a pnpm workspace member's own run, `{ keeps_file_range }`, which
+--- says whether a `file:` range names a directory inside its workspace.
+--- @param workspace_members table|nil for a workspace root's run, each member's package name mapped
+--- to its directory, which `pnpm --filter <name>` addresses.
+local function package(text, where, member, workspace_members)
   local blockers = {}
   if type(text) == "string" and string.sub(text, 1, 3) == BOM then text = string.sub(text, 4) end
   local ok_text = type(text) == "string" and string.match(text, "^%s*{") ~= nil
@@ -353,8 +368,8 @@ local function package(text, where)
   if candidates == nil then blocker(blockers, "engines." .. engine, where, why, SURFACE.engines) end
   config.version = candidates and candidates[1]
   config.overrides = overrides_of(parsed, raw, where, blockers)
-  config.packages = dependency_map(parsed, "dependencies", where, blockers)
-  config.devPackages = dependency_map(parsed, "devDependencies", where, blockers)
+  config.packages = dependency_map(parsed, "dependencies", where, blockers, member)
+  config.devPackages = dependency_map(parsed, "devDependencies", where, blockers, member)
   if parsed.type ~= nil then
     if parsed.type == "module" or parsed.type == "commonjs" then
       config.type = parsed.type
@@ -362,7 +377,7 @@ local function package(text, where)
       blocker(blockers, '"type"', where, "is neither \"module\" nor \"commonjs\"", SURFACE.type)
     end
   end
-  config.scripts = translated_scripts(parsed, where, blockers)
+  config.scripts = translated_scripts(parsed, where, blockers, workspace_members)
   config.entry = entry_of(parsed, config.scripts ~= nil, where, blockers)
   if is_packed(parsed, config.scripts ~= nil) then config[published.KEY] = published_fields(parsed, raw, where, blockers) end
   local commands = {}
