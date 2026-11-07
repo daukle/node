@@ -243,7 +243,10 @@ the report says the build differs and names the tree lines only one side has, wi
 applies ignore rules only to untracked files, so the first `node:install` rewrites a tracked file and
 `git commit -a` would commit the generated copy. Run `git rm --cached package.json` (and
 `git rm -r --cached node_modules` if `node_modules` was tracked, and the same for each
-`nestedPackages` directory's `package.json`), then commit.
+`nestedPackages` directory's `package.json`), then commit. A pnpm workspace's root install places
+`pnpm-workspace.yaml`, `pnpm-lock.yaml` and each member's `package.json` as copies too, so untrack
+those as well: `git rm --cached pnpm-workspace.yaml pnpm-lock.yaml packages/a/package.json`, with
+every member's directory in place of `packages/a`.
 
 ## `node` and `npm`
 
