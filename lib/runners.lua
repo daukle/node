@@ -17,9 +17,9 @@ local ECHO_NAME = "__daukle_echo__.mjs"
      null source a hook would need to hand the module back. ]]
 local RESOLVER = [==[
 import Module, { createRequire, isBuiltin, registerHooks } from "node:module";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { pathToFileURL, fileURLToPath } from "node:url";
-import { dirname, join, resolve as resolvePath } from "node:path";
+import { dirname, join, resolve as resolvePath, sep } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const anchor = join(here, "__daukle_anchor__.js");
@@ -80,10 +80,47 @@ function namesThisPackage(specifier) {
   return ownName !== null && (specifier === ownName || specifier.startsWith(ownName + "/"));
 }
 
+const inWorkspace = __DAUKLE_WORKSPACE__;
+const ownModules = realModules(here);
+const modulesByDirectory = new Map();
+
+function realModules(directory) {
+  try {
+    return realpathSync(join(directory, "node_modules"));
+  } catch {
+    return null;
+  }
+}
+
+function isInsideProject(directory) {
+  return directory === projectRoot || directory.startsWith(projectRoot + sep);
+}
+
+/**
+ * Whether the nearest node_modules above the importing file is another workspace project's.
+ *
+ * @implNote each project of a pnpm workspace has modules of its own, so a sibling's file, or a
+ * package in the workspace's virtual store, resolves from where it lies, as node would.
+ */
+function belongsToAnotherWorkspaceProject(parentURL) {
+  if (!inWorkspace) return false;
+  for (let directory = dirname(fileURLToPath(parentURL)); isInsideProject(directory);
+       directory = dirname(directory)) {
+    let modules = modulesByDirectory.get(directory);
+    if (modules === undefined) {
+      modules = realModules(directory);
+      modulesByDirectory.set(directory, modules);
+    }
+    if (modules !== null) return modules !== ownModules;
+    if (directory === projectRoot) return false;
+  }
+  return false;
+}
+
 function belongsToThisProject(parentURL) {
   if (typeof parentURL !== "string") return false;
   if (!parentURL.startsWith(projectUnder)) return false;
-  return !parentURL.startsWith(installedUnder);
+  return !parentURL.startsWith(installedUnder) && !belongsToAnotherWorkspaceProject(parentURL);
 }
 
 // Iterated rather than indexed, because the shape is not one thing: node
@@ -140,10 +177,12 @@ registerHooks({
 --- The resolver for a project of this type, which leaves `own_name` to node when it is given.
 ---
 --- @param own_name the packed package's name as its JSON text, or nil when it has no `exports`
-local function resolver_for(project_type, own_name)
+--- @param in_workspace whether the project is a pnpm workspace's root or member
+local function resolver_for(project_type, own_name, in_workspace)
   local type_literal = project_type == nil and "null" or ('"' .. project_type .. '"')
   local with_type = string.gsub(RESOLVER, "__DAUKLE_TYPE__", type_literal)
-  return (string.gsub(with_type, "__DAUKLE_SELF__", function() return own_name or "null" end))
+  local with_workspace = string.gsub(with_type, "__DAUKLE_WORKSPACE__", in_workspace and "true" or "false")
+  return (string.gsub(with_workspace, "__DAUKLE_SELF__", function() return own_name or "null" end))
 end
 
 --[[ @implNote an npm bin shim is nothing but "<node> <package>/<bin field>",

@@ -27,7 +27,8 @@ daukle.toolchain{
     runtimes.for_host{ os = context.host.os, arch = context.host.arch, version = spec.version }
     local files = {
       ["package.json"] = settings.package_json(spec),
-      [runners.RESOLVER_NAME] = runners.resolver_for(spec.type, settings.own_name_of(spec)),
+      [runners.RESOLVER_NAME] = runners.resolver_for(spec.type, settings.own_name_of(spec),
+                                                     spec.workspace ~= nil or spec.workspace_root ~= nil),
       [runners.BIN_RUNNER_NAME] = runners.BIN_RUNNER,
       [runners.REMOVER_NAME] = runners.REMOVER,
       [runners.ECHO_NAME] = runners.ECHO,
@@ -163,10 +164,9 @@ local function derived_from_package_root(context)
   return paths.climb_from(package_root(context)) .. "build/daukle/" .. context.toolchain.name
 end
 
---- Places this instance's generated files at its package root and, unless `mode` is "place",
---- links its node_modules there too.
-local function place_at_package_root(context, root, pick, mode)
-  daukle.exec(root:tool(pick.node), { "./" .. links.SCRIPT_NAME, context.root, mode })
+--- Places this instance's generated files at its package root and links its node_modules there.
+local function place_at_package_root(context, root, pick)
+  daukle.exec(root:tool(pick.node), { "./" .. links.SCRIPT_NAME, context.root })
 end
 
 local function run_task_of(name)
@@ -205,7 +205,11 @@ end
 --- The one install of a pnpm workspace, run from its root's own directory once every project's
 --- `package.json`, the workspace file and the lockfile are placed there, with everything pnpm
 --- writes kept under `build/`: each project's modules in its own `build/daukle/node_modules`, the
---- virtual store and the store in the root's derived directory.
+--- virtual store and the store in the root's derived directory. Every member is placed and linked
+--- by it, so a member's own modules resolve when only a sibling's task ran this install.
+---
+--- @implNote a member is linked before the install, not after it: its `:place` runs at most once
+--- per invocation, and the link names a directory pnpm then fills.
 ---
 --- @implNote the root is linked before the install as well as after it: pnpm 10 and 11 write
 --- `node_modules/.pnpm-workspace-state-v1.json` at the workspace root whatever `--modules-dir`
@@ -258,7 +262,7 @@ daukle.task{
   name = "node:place",
   run = function(context)
     local root, pick = provision_node(context, settings.read(context))
-    place_at_package_root(context, root, pick, "place")
+    place_at_package_root(context, root, pick)
   end,
 }
 

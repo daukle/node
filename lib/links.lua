@@ -42,7 +42,6 @@ const windows = process.platform === "win32";
 const derived = resolve(".");
 const projectRoot = resolve(derived, "..", "..", "..");
 const packageRoot = resolve(process.argv[2] ?? projectRoot);
-const placesOnly = process.argv[3] === "place";
 const derivedModules = join(derived, "node_modules");
 const derivedManifest = join(derived, "package.json");
 const placedRecord = join(derived, PLACED_NAME);
@@ -317,7 +316,7 @@ let modules;
 let nested;
 let files;
 try {
-  modules = placesOnly ? null : modulesAction();
+  modules = modulesAction();
   manifestAction();
   nested = nestedActions();
   files = fileActions();
@@ -327,10 +326,8 @@ try {
   process.exit(1);
 }
 const installed = workspaceModules();
-if (!placesOnly) {
-  if (installed !== null) linkDerivedModules(installed);
-  placeModules(modules);
-}
+if (installed !== null) linkDerivedModules(installed);
+placeModules(modules);
 placeManifest();
 placeNested(nested);
 placeFiles(files);
