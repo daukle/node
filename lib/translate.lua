@@ -91,7 +91,15 @@ local function is_local_path(range)
               or string.match(lowered, "%.tar$")) ~= nil
 end
 
-local function dependency_map(package, key, where, blockers)
+--- Whether a workspace member keeps `range` as written, for pnpm to resolve inside the workspace:
+--- a `workspace:` or `catalog:` range, or a `file:` range naming a directory the member accepts.
+local function is_kept_by_member(member, range)
+  if member == nil or type(range) ~= "string" then return false end
+  if workspace_protocol_of(range) ~= nil then return true end
+  return string.sub(string.lower(range), 1, 5) == "file:" and member.keeps_file_range(range)
+end
+
+local function dependency_map(package, key, where, blockers, member)
   local map = package[key]
   if map == nil then return nil end
   if type(map) ~= "table" or #map > 0 then
@@ -106,6 +114,9 @@ local function dependency_map(package, key, where, blockers)
     local protocol = type(range) == "string" and workspace_protocol_of(range) or nil
     if name_problem ~= nil then
       blocker(blockers, key .. '."' .. name .. '"', where, name_problem, SURFACE.dependencies)
+    elseif is_kept_by_member(member, range) then
+      out[name] = range
+      any = true
     elseif type(range) == "string" and is_local_path(range) then
       blocker(blockers, key .. '."' .. name .. '"', where, string.format('is "%s", a local path'
               .. ' npm would resolve against the generated package.json\'s directory rather than'
@@ -327,7 +338,9 @@ local function pnpm_release_of(package_manager)
          or string.match(package_manager, "^pnpm@(%d+%.%d+%.%d+)%+sha%d+%.[%x]+$")
 end
 
-local function package(text, where)
+--- @param member table|nil for a pnpm workspace member's own run, `{ keeps_file_range }`, which
+--- says whether a `file:` range names a directory inside its workspace.
+local function package(text, where, member)
   local blockers = {}
   if type(text) == "string" and string.sub(text, 1, 3) == BOM then text = string.sub(text, 4) end
   local ok_text = type(text) == "string" and string.match(text, "^%s*{") ~= nil
@@ -353,8 +366,8 @@ local function package(text, where)
   if candidates == nil then blocker(blockers, "engines." .. engine, where, why, SURFACE.engines) end
   config.version = candidates and candidates[1]
   config.overrides = overrides_of(parsed, raw, where, blockers)
-  config.packages = dependency_map(parsed, "dependencies", where, blockers)
-  config.devPackages = dependency_map(parsed, "devDependencies", where, blockers)
+  config.packages = dependency_map(parsed, "dependencies", where, blockers, member)
+  config.devPackages = dependency_map(parsed, "devDependencies", where, blockers, member)
   if parsed.type ~= nil then
     if parsed.type == "module" or parsed.type == "commonjs" then
       config.type = parsed.type

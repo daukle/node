@@ -83,8 +83,8 @@ server.serve_forever()
 # catalog names its release beside the staged node plugin.
 NPM_PLUGIN_URL=https://github.com/daukle/npm/releases/download/2.3.1/plugin.lua
 NPM_PLUGIN_SHA256=c22b1f97d292863a6c3988853d4db324a9abc505fd0b1f6f853fdf0f804a9351
-PNPM_PLUGIN_URL=https://github.com/daukle/pnpm/releases/download/1.0.2/plugin.lua
-PNPM_PLUGIN_SHA256=2fb5918313c45a00553dd3ce078bd6a1087f9437f963f906c62d25f8e08cdba5
+PNPM_PLUGIN_URL=https://github.com/daukle/pnpm/releases/download/1.1.0/plugin.lua
+PNPM_PLUGIN_SHA256=197226706a27c571d67283ce3b97b1beacad507cf32f259e9b05884abb8e662e
 
 serve_plugin() {
   [ -n "${catalog:-}" ] && return 0
@@ -178,6 +178,12 @@ run_migrate_case() {
     done < "$case_dir/expect-absent.txt"
   fi
   grep_clauses_in "$sandbox/daukle.toml" "$case_dir/expect-manifest.txt" || return 1
+  if [ -f "$case_dir/expect-manifest-absent.txt" ]; then
+    while IFS= read -r absent || [ -n "$absent" ]; do
+      [ -z "$absent" ] && continue
+      grep -qF "$absent" "$sandbox/daukle.toml" && { fail "$label" "daukle.toml carries what it must not: $absent"; return 1; }
+    done < "$case_dir/expect-manifest-absent.txt"
+  fi
   if [ -f "$case_dir/expect-gone.txt" ]; then
     while IFS= read -r gone || [ -n "$gone" ]; do
       [ -z "$gone" ] && continue

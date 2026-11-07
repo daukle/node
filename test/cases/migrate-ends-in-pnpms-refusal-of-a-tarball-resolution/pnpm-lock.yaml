@@ -1,0 +1,39 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+overrides:
+  ms: file:./ms-local.tgz
+
+importers:
+
+  .:
+    dependencies:
+      debug:
+        specifier: 4.3.4
+        version: 4.3.4
+
+packages:
+
+  debug@4.3.4:
+    resolution: {integrity: sha512-PRWFHuSU3eDtQJPvnNY7Jcket1j0t5OuOsFzPPzsekD52Zl8qUfFIPEiswXqIvHWGVHOgX+7G/vCNNhehwxfkQ==}
+    engines: {node: '>=6.0'}
+    peerDependencies:
+      supports-color: '*'
+    peerDependenciesMeta:
+      supports-color:
+        optional: true
+
+  ms@file:ms-local.tgz:
+    resolution: {integrity: sha512-MiH3jfdjpw+MlfKg/rVYbUbTZK11ytLJvO8lNaT9nOsLMEkZC24eZAMjVh33S0wlwEZe/KjEAF8KqOfnbkTHEw==, tarball: file:ms-local.tgz}
+    version: 2.1.2
+
+snapshots:
+
+  debug@4.3.4:
+    dependencies:
+      ms: file:ms-local.tgz
+
+  ms@file:ms-local.tgz: {}

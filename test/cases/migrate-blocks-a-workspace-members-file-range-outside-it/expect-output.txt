@@ -1,0 +1,2 @@
+packages/b/package.json: dependencies."x": is "file:../../../outside", a local path
+3. Dependencies: local paths, `file:`
