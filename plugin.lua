@@ -192,6 +192,10 @@ local function member_dir_in_root(context, spec)
                       context.toolchain.name), 0)
 end
 
+local function refuse_an_unlisted_member(context, spec)
+  member_dir_in_root(context, spec)
+end
+
 local function refuse_a_workspace_without_pins(spec)
   if spec.pnpm_lock ~= nil then return end
   error("a pnpm workspace installs the closure daukle/pnpm pins, and this block carries no pins: resolve"
@@ -234,7 +238,7 @@ local function install_and_link(context, spec)
   end
   if spec.workspace_root ~= nil then
     run_task_of(spec.workspace_root .. ":install")
-    member_dir_in_root(context, spec)
+    refuse_an_unlisted_member(context, spec)
   end
   local root, pick = install_packages(context, spec)
   place_at_package_root(context, root, pick)

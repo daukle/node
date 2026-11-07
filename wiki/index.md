@@ -234,10 +234,10 @@ project's `node:tree` must match it byte for byte. A pnpm tree lists every entry
 store, so the whole closure is compared and not only the direct dependencies. In a pnpm workspace
 the original is installed once, and each root or member lists the store entries its own
 dependencies reach and each workspace project it links by that project's path; the new side
-installs the workspace rebuilt from `daukle.toml` under the root's `build/daukle/<instance>/`. A `package-lock.json`
-missing a tarball or digest for some entry is re-resolved rather than pinned as committed, and when
-the fresh closure differs from what the lockfile installed the proof fails: the report says the
-build differs and gives both digests, and both trees are printed so you can compare them.
+installs the workspace rebuilt from `daukle.toml` under the root's `build/daukle/<instance>/`.
+A `package-lock.json` missing a tarball or digest for some entry is re-resolved rather than pinned
+as committed, and when the fresh closure differs from what the lockfile installed the proof fails:
+the report says the build differs and names the tree lines only one side has, with both digests.
 
 **After migrating, untrack the old `package.json`.** It was almost certainly committed, and git
 applies ignore rules only to untracked files, so the first `node:install` rewrites a tracked file and
