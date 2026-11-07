@@ -61,8 +61,16 @@ local function step_words(step)
   local words = env_words(step.env)
   if step.kind == "script" then
     words[#words + 1] = "npm"
-    words[#words + 1] = "run"
-    words[#words + 1] = step.name
+    if step.shorthand ~= nil then
+      words[#words + 1] = step.shorthand
+    else
+      words[#words + 1] = "run"
+      words[#words + 1] = step.name
+    end
+    if step.package ~= nil then
+      words[#words + 1] = "--prefix"
+      words[#words + 1] = word(step.package)
+    end
     if #step.args > 0 then words[#words + 1] = "--" end
     for _, argument in ipairs(step.args) do words[#words + 1] = word(argument) end
     return words

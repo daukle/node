@@ -17,8 +17,6 @@ for name in string.gmatch("add audit bin config create dedupe deploy dlx doctor 
                           .. " update upgrade why", "%S+") do
   PNPM_COMMANDS[name] = true
 end
-local NPM_SCRIPT_VERBS = { test = "test", t = "test", start = "start", stop = "stop",
-                           restart = "restart" }
 
 local SHELL = 'needs a shell, which this toolchain refuses by design: "%s"'
 local GLOB_CHARACTER = "[%*%?%[%]]"
@@ -127,23 +125,62 @@ local function passed_arguments(words, from, target)
   return rest_of(words, from + 1)
 end
 
+--- The words with npm's `--prefix <dir>` or `--prefix=<dir>` taken out, and the directory.
+local function without_prefix(words)
+  local kept, prefix = {}, nil
+  local index = 1
+  while index <= #words do
+    local word = words[index]
+    if word == "--" then
+      for rest = index, #words do kept[#kept + 1] = words[rest] end
+      break
+    end
+    if word == "--prefix" and type(words[index + 1]) == "string" then
+      prefix = words[index + 1]
+      index = index + 2
+    elseif type(word) == "string" and string.sub(word, 1, 9) == "--prefix=" then
+      prefix = string.sub(word, 10)
+      index = index + 1
+    else
+      kept[#kept + 1] = word
+      index = index + 1
+    end
+  end
+  return kept, prefix
+end
+
+--- `npm run <script>`, a shorthand such as `npm test`, and either with `--prefix <dir>`, which
+--- runs the script of the package in `<dir>`: a node instance of its own (D-248, D-255).
 local function npm_step(words, declared)
+  local prefix
+  words, prefix = without_prefix(words)
   local verb = words[2]
-  local target, from
+  local target, from, shorthand
   if (verb == "run" or verb == "run-script") and words[3] ~= nil then
     target, from = words[3], 4
-  elseif NPM_SCRIPT_VERBS[verb] ~= nil then
-    target, from = NPM_SCRIPT_VERBS[verb], 3
+  elseif scripts.NPM_SHORTHANDS[verb] ~= nil then
+    target, from, shorthand = scripts.NPM_SHORTHANDS[verb], 3, verb
   else
     return nil, string.format('runs "npm %s", which has no daukle equivalent', tostring(verb))
+  end
+  if prefix ~= nil then
+    if not scripts.is_package_directory(string.gsub(prefix, "^%./", "")) then
+      return nil, string.format('runs a script with "--prefix %s", which is not a directory below this'
+                                .. ' package', prefix)
+    end
+    if words[from] ~= nil then
+      return nil, string.format('passes arguments to "%s" in "%s", which a nested package\'s script'
+                                .. ' step cannot carry yet', target, prefix)
+    end
+    return { script = target, package = (string.gsub(prefix, "^%./", "")), shorthand = shorthand }
   end
   if not declared[target] then
     return nil, string.format('runs "%s", which is not a declared script', target)
   end
   local args, why = passed_arguments(words, from, target)
   if args == nil then return nil, why end
-  if #args == 0 then return { script = target } end
-  return { script = target, args = args }
+  if #args == 0 then return { script = target, shorthand = shorthand } end
+  return { script = target, args = args, shorthand = shorthand }
 end
 
 --- `pnpm run <script>`, `pnpm test`, `pnpm start` and the `pnpm <script>` shorthand, as a script

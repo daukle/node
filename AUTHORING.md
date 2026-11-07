@@ -280,7 +280,14 @@ one of its rows.
   member by its bytes and `package.json` by its parsed value, because the packed manifest is
   rendered from the toolchain's keys and not the author's bytes (`D-250`). The old side is npm's own `npm pack` of the original package. A script the
   package publishes must render back from its steps to exactly the declared text
-  (`lib/published.lua`), or it is a blocker naming it: `npm test` renders as `npm run test`.
+  (`lib/published.lua`), or it is a blocker naming it. A script step keeps npm's shorthand
+  (`shorthand = "test"` for `npm test`) and a remove step its flag spelling, so both render as
+  written.
+- **A script in a nested package runs as that package's own task** (`D-255`): `npm test --prefix
+  sub` becomes `{ script = "test", package = "sub" }`, which runs `node-sub:test` through core's
+  `daukle.run_task` (core `0.24.0`). The task name follows core's instance naming, `node-<dir>`
+  with every `/` a `-`, and the migrator blocks the step unless `sub` is a nested package it
+  hands back that declares the script.
 - **A package that `exports` resolves its own name as node does** (`D-252`): node self-references
   only through the `exports` of the nearest `package.json`, so the generated one, and the copy
   `node:install` places at the root, carries the packed `name` and `exports`, and the resolver hook
