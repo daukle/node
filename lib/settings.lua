@@ -131,14 +131,30 @@ local function json_object(names, packages, indent)
   return "{\n" .. body .. indent .. "}"
 end
 
---[[ No "name": the project did not choose one and a generated name would show
-     up in npm's output as if it had. "private" is what stops npm asking for the
-     name and the version a publishable package needs. ]]
 --- The carried fields, each written as `"name": <its JSON text>` after a separator.
 local function carried_fields(names, values)
   local text = ""
   for _, name in ipairs(names or {}) do text = text .. ',\n  "' .. name .. '": ' .. values[name] end
   return text
+end
+
+--- The JSON text of the name the package resolves itself by, or nil when it `exports` nothing.
+local function own_name_of(spec)
+  local packed = spec.published
+  if packed == nil or packed.exports == nil then return nil end
+  return packed.name
+end
+
+--- The packed package's `name` and `exports`, which node reads from this file to resolve the
+--- package's own name from inside it, as it does in the original.
+---
+--- @implNote written only beside `exports`: node self-references through `exports` alone, and a
+--- name nobody chose would show up in npm's output as if the project had chosen it. "private" is
+--- what stops npm asking for the name and the version a publishable package needs.
+local function self_reference_fields(spec)
+  local own_name = own_name_of(spec)
+  if own_name == nil then return "" end
+  return '  "name": ' .. own_name .. ',\n  "exports": ' .. spec.published.exports .. ',\n'
 end
 
 --- @implNote an offline `npm ci` checks each lockfile edge against the package.json beside it,
@@ -166,6 +182,7 @@ local function package_json(spec)
   return '{\n'
     .. '  "' .. links.MARKER_KEY .. '": "' .. links.MARKER_TEXT .. '",\n'
     .. type_line
+    .. self_reference_fields(spec)
     .. '  "private": true,\n'
     .. '  "dependencies": ' .. json_object(spec.packages, spec.package_ranges, "  ") .. ',\n'
     .. '  "devDependencies": ' .. json_object(spec.dev_packages, spec.dev_ranges, "  ")
@@ -185,7 +202,7 @@ local function published_of(config)
     local label = '"' .. published.KEY .. "." .. tostring(name) .. '"'
     if not published.FIELDS[name] then
       error(label .. " is not a field this table publishes: it holds the name, version, metadata,"
-            .. ' "main" and "files", and every other field has a key of its own', 0)
+            .. ' "main", "exports" and "files", and every other field has a key of its own', 0)
     end
     if type(text) ~= "string" or not package_fields.is_json_value(text) then
       error(label .. " must be one JSON value as text, such as '\"1.0.0\"'", 0)
@@ -227,6 +244,7 @@ end
 return {
   read = read,
   package_json = package_json,
+  own_name_of = own_name_of,
   package_name_problem = package_name_problem,
   is_project_path = is_project_path,
 }

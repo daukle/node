@@ -26,7 +26,7 @@ daukle.toolchain{
     runtimes.for_host{ os = context.host.os, arch = context.host.arch, version = spec.version }
     local files = {
       ["package.json"] = settings.package_json(spec),
-      [runners.RESOLVER_NAME] = runners.resolver_for(spec.type),
+      [runners.RESOLVER_NAME] = runners.resolver_for(spec.type, settings.own_name_of(spec)),
       [runners.BIN_RUNNER_NAME] = runners.BIN_RUNNER,
       [runners.REMOVER_NAME] = runners.REMOVER,
       [runners.ECHO_NAME] = runners.ECHO,
