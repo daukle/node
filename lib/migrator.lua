@@ -477,8 +477,11 @@ local function is_pnpm_project(files, config)
 end
 
 --- Why a `packageManager` naming pnpm cannot be handed to daukle/pnpm, or nil when it can.
-local function pnpm_blockers(context, files, config, where)
-  if config.pnpm == nil or is_pnpm_project(files, config) then return {} end
+---
+--- @implNote a workspace member's own `packageManager` is not checked: pnpm installs the member
+--- from its root's lockfile, with the root's release.
+local function pnpm_blockers(files, config, where, is_member)
+  if is_member or config.pnpm == nil or is_pnpm_project(files, config) then return {} end
   local why = files.exists["package-lock.json"]
               and "names pnpm, and the project also commits a package-lock.json, so which closure it installs is ambiguous"
               or "names pnpm, and the project commits no pnpm-lock.yaml for daukle/pnpm to pin"
@@ -717,7 +720,7 @@ local function run_package(context, files, translation, workspace, members)
   translation.config[nested.KEY] = boundaries
   files.installs_with_pnpm = is_pnpm_project(files, translation.config)
   if workspace ~= nil then adopt_workspace(context, translation, workspace, members) end
-  for _, refused in ipairs(pnpm_blockers(context, files, translation.config, where)) do
+  for _, refused in ipairs(pnpm_blockers(files, translation.config, where, translation.root ~= nil)) do
     translation.blockers[#translation.blockers + 1] = refused
   end
   if #translation.blockers > 0 then
