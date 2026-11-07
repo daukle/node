@@ -272,15 +272,20 @@ one of its rows.
   in `migrate-lockcheck/`. npm 11 refuses some lockfiles npm 10 wrote (`Missing: fsevents@2.3.3
   from lock file`, whisper.cpp's `examples/addon.node`). `build` makes the same choice, since it
   translates again. When no pinned npm accepts the lockfile it is a blocker carrying npm's reason.
-- **A package that declares `"files"`, or a non-private one with a `main` beside scripts, is
-  PACKED** (`D-238`, spec `2026-11-06-npm-packing-design.md`). Its `name`, `version`, metadata,
-  `main` and `files` go into the `package` key as raw JSON text, and its proof is
+- **A package that declares `"files"` or `"exports"`, or a non-private one with a `main` beside
+  scripts, is PACKED** (`D-238`, spec `2026-11-06-npm-packing-design.md`). Its `name`, `version`,
+  metadata, `main`, `exports` and `files` go into the `package` key as raw JSON text, and its proof is
   `node:migration-proof`, which runs `node:tree` and `node:pack` and also compares the tarball
   itself, kept as `package.tgz` on both sides, with core's `as = "archive-json"` (api 9): every
   member by its bytes and `package.json` by its parsed value, because the packed manifest is
   rendered from the toolchain's keys and not the author's bytes (`D-250`). The old side is npm's own `npm pack` of the original package. A script the
   package publishes must render back from its steps to exactly the declared text
   (`lib/published.lua`), or it is a blocker naming it: `npm test` renders as `npm run test`.
+- **A package that `exports` resolves its own name as node does** (`D-252`): node self-references
+  only through the `exports` of the nearest `package.json`, so the generated one, and the copy
+  `node:install` places at the root, carries the packed `name` and `exports`, and the resolver hook
+  hands a specifier naming the package to node untouched rather than resolving it from the derived
+  directory, whose `node_modules` holds no copy of the project.
 - **`node:pack` packs with npm's own code.** `lib/pack.lua`'s script asks the provisioned npm's
   `npm-packlist` for the file list, with the Arborist tree's manifest replaced in memory, copies
   those files into `pack/` beside the rendered manifest and runs `npm pack --ignore-scripts`

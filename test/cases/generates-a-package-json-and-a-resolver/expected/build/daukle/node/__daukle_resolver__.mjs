@@ -54,6 +54,14 @@ function namesAPackage(specifier) {
   return !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(specifier);
 }
 
+// Node resolves a package's own name through the "exports" of the nearest
+// package.json, which at the root is the placed copy carrying them, so that
+// name is left to node: from the derived directory it would not resolve.
+const ownName = null;
+function namesThisPackage(specifier) {
+  return ownName !== null && (specifier === ownName || specifier.startsWith(ownName + "/"));
+}
+
 function belongsToThisProject(parentURL) {
   if (typeof parentURL !== "string") return false;
   if (!parentURL.startsWith(projectUnder)) return false;
@@ -87,7 +95,8 @@ if (!inheritedOptions) {
 let resolving = false;
 
 function resolveSpecifier(specifier, context, nextResolve) {
-  if (resolving || !namesAPackage(specifier) || !belongsToThisProject(context.parentURL)) {
+  if (resolving || !namesAPackage(specifier) || namesThisPackage(specifier)
+      || !belongsToThisProject(context.parentURL)) {
     return nextResolve(specifier, context);
   }
   if (hasCondition(context.conditions, "import")) {
