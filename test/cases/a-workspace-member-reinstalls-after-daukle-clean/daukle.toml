@@ -1,0 +1,33 @@
+schema = 1
+project = "daukle/node-test"
+version = "1.0.0"
+
+[modules]
+
+[plugins]
+node = "./plugins/node"
+
+[toolchains.node]
+version = "26.3.1"
+
+[toolchains.node.workspace]
+members = ["packages/a", "packages/b"]
+
+[toolchains.node-packages-a]
+version = "26.3.1"
+workspace = "node"
+toolchain = "node"
+dir = "packages/a"
+
+[toolchains.node-packages-b]
+version = "26.3.1"
+workspace = "node"
+toolchain = "node"
+dir = "packages/b"
+
+[toolchains.node-packages-b.scripts]
+check = { node = ["-e", "console.log(require('a'), require('./index.js'))"] }
+
+[toolchains.node-packages-b.packages]
+a = "workspace:*"
+semver = "7.6.3"

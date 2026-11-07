@@ -249,7 +249,71 @@ local function published_of(config)
   return value
 end
 
---- @implNote a workspace root's block accepts `workspace:`, `catalog:` and `file:` pins as well, for the root's own dependency on a member (vue's `"@vue/compiler-sfc": "workspace:*"`), which a later change translates.
+local WORKSPACE_KEYS = { members = true, catalog = true, catalogs = true }
+
+local function workspace_problem(text)
+  return '"' .. pnpm_workspace.KEY .. '" ' .. text
+end
+
+--- A catalog as read from daukle.toml: package name to range, each a one-line string.
+local function checked_catalog(catalog, label)
+  if type(catalog) ~= "table" then error(workspace_problem(label .. " must be a table of package name to range"), 0) end
+  for name, range in pairs(catalog) do
+    if type(name) ~= "string" or type(range) ~= "string" or string.find(name .. range, "%c") then
+      error(workspace_problem(label .. '."' .. tostring(name) .. '" must be a range as a one-line string'), 0)
+    end
+  end
+  return catalog
+end
+
+--- A workspace root's `workspace`: its members by directory below it, and its catalogs.
+local function workspace_of(config)
+  local value = config[pnpm_workspace.KEY]
+  if value == nil or type(value) == "string" then return nil end
+  if type(value) ~= "table" then
+    error(workspace_problem("is a member's root instance as a string, or a root's members and catalogs as a table"), 0)
+  end
+  for key in pairs(value) do
+    if not WORKSPACE_KEYS[key] then error(workspace_problem('holds "' .. tostring(key) .. '", which is not "members", "catalog" or "catalogs"'), 0) end
+  end
+  local members = value.members
+  if type(members) ~= "table" or #members == 0 then
+    error(workspace_problem('needs "members", the directories of the workspace\'s packages'), 0)
+  end
+  for _, member in ipairs(members) do
+    if type(member) ~= "string" or not is_project_path(member) or string.find(member, "%c") then
+      error(workspace_problem('"members" names "' .. tostring(member) .. '", which is not a directory inside the project'), 0)
+    end
+  end
+  local catalogs = nil
+  if value.catalogs ~= nil then
+    if type(value.catalogs) ~= "table" then error(workspace_problem('"catalogs" must be a table of catalog name to catalog'), 0) end
+    catalogs = {}
+    for name, catalog in pairs(value.catalogs) do catalogs[name] = checked_catalog(catalog, 'catalogs."' .. tostring(name) .. '"') end
+  end
+  return { members = members, catalog = value.catalog ~= nil and checked_catalog(value.catalog, "catalog") or nil,
+           catalogs = catalogs }
+end
+
+--- A member's `workspace`, the instance of the workspace root it installs through.
+local function workspace_root_of(config)
+  local value = config[pnpm_workspace.KEY]
+  if type(value) ~= "string" then return nil end
+  if string.match(value, "^[%w][%w%.%_%-]*$") == nil then
+    error(workspace_problem('names "' .. value .. '", which is not an instance name'), 0)
+  end
+  return value
+end
+
+--- A workspace member's own ranges, which its rendered package.json declares for pnpm to install.
+local function member_packages(config, key)
+  local map = config[key] or {}
+  return sorted_names(map), map
+end
+
+--- @implNote a workspace root's block accepts `workspace:`, `catalog:` and `file:` pins as well,
+--- for the root's own dependency on a member (vue's `"@vue/compiler-sfc": "workspace:*"`), since
+--- pnpm resolves those inside the workspace rather than from a registry.
 local function read(context)
   local config = config_of(context)
   reject_unknown_keys(config)
@@ -257,7 +321,12 @@ local function read(context)
   local in_workspace = config[pnpm_workspace.KEY] ~= nil
   checked_ranges(pinned.packages, pinned.package_ranges, "dependencies", in_workspace)
   checked_ranges(pinned.dev_packages, pinned.dev_ranges, "devDependencies", in_workspace)
-  if is_workspace_member(config) then check_member_ranges(config) end
+  local workspace_root = workspace_root_of(config)
+  if workspace_root ~= nil then
+    check_member_ranges(config)
+    pinned.packages, pinned.package_ranges = member_packages(config, "packages")
+    pinned.dev_packages, pinned.dev_ranges = member_packages(config, "devPackages")
+  end
   local declared_scripts = scripts.read(config)
   local field_names, fields = package_fields.checked(config, WRITTEN)
   return {
@@ -276,6 +345,8 @@ local function read(context)
     pnpm_lock = pnpm_lock,
     published = published_of(config),
     nested = nested.read(config),
+    workspace = workspace_of(config),
+    workspace_root = workspace_root,
   }
 end
 

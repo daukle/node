@@ -27,7 +27,20 @@ local function matches(pattern, path, wanted)
   end }
 end
 
-local SHADCN = "packages:\n  - \"apps/*\"\n  - \"packages/*\"\n\nallowBuilds:\n  esbuild: true\n"
+local function renders(name, workspace, wanted)
+  return { name = name, check = function() return expect.equal(pnpm_workspace.render(workspace), wanted) end }
+end
+
+local RENDERED = { members = { "packages/a", "packages/it's" }, catalog = { react = "^18.2.0", ["@types/node"] = "20.0.0" },
+                   catalogs = { legacy = { react = "^17.0.2" } } }
+
+local function reads_back(field, wanted)
+  return { name = "reads the rendered " .. field .. " back", check = function()
+    return expect.equal(pnpm_workspace.read(pnpm_workspace.render(RENDERED))[field], wanted)
+  end }
+end
+
+local SHADCN ="packages:\n  - \"apps/*\"\n  - \"packages/*\"\n\nallowBuilds:\n  esbuild: true\n"
 
 return {
   reads("reads vue's packages", "packages:\n  - 'packages/*'\n", "packages", { "packages/*" }),
@@ -83,4 +96,12 @@ return {
   matches("**", "a/.b/c", false),
   matches("*", ".b", false),
   matches(".b/*", ".b/c", true),
+  renders("renders each member and no catalog", { members = { "packages/a", "packages/b" } },
+          "packages:\n  - 'packages/a'\n  - 'packages/b'\n"),
+  renders("renders the catalogs sorted", RENDERED,
+          "packages:\n  - 'packages/a'\n  - 'packages/it''s'\ncatalog:\n  '@types/node': '20.0.0'\n  'react': '^18.2.0'\n"
+          .. "catalogs:\n  'legacy':\n    'react': '^17.0.2'\n"),
+  reads_back("packages", { "packages/a", "packages/it's" }),
+  reads_back("catalog", { react = "^18.2.0", ["@types/node"] = "20.0.0" }),
+  reads_back("catalogs", { legacy = { react = "^17.0.2" } }),
 }

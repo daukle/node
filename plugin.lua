@@ -18,6 +18,7 @@ local pack = daukle.require("lib/pack")
 local published = daukle.require("lib/published")
 local pnpm_mirror = daukle.require("lib/pnpm_mirror")
 local nested = daukle.require("lib/nested")
+local pnpm_workspace = daukle.require("lib/pnpm_workspace")
 
 daukle.toolchain{
   name = "node",
@@ -34,7 +35,9 @@ daukle.toolchain{
       [links.SCRIPT_NAME] = links.SCRIPT,
       [npm_launcher.SCRIPT_NAME] = npm_launcher.SCRIPT,
       [nested.PLACEMENTS_NAME] = nested.placements_json(spec.nested),
+      [links.WORKSPACE_NAME] = links.workspace_json(spec),
     }
+    if spec.workspace ~= nil then files[links.WORKSPACE_FILE_NAME] = pnpm_workspace.render(spec.workspace) end
     if spec.lock ~= nil then files["package-lock.json"] = spec.lock.text end
     if spec.pnpm_lock ~= nil then
       files["pnpm-lock.yaml"] = spec.pnpm_lock.text
@@ -96,27 +99,34 @@ local function through_launcher(npm_argv)
   return npm_argv
 end
 
---- Installs exactly the pinned closure, with npm reaching no network: every tarball this host
---- installs is fetched by daukle against its sha256 and handed to npm's cache, which npm keys
---- by the lockfile's integrity, so a tarball missing from it fails ENOTCACHED naming it.
---- Installs a pnpm project's pinned closure with its pinned pnpm, through a loopback mirror of
---- the tarballs daukle fetched, so `--frozen-lockfile` reaches no network (D-251).
-local function install_with_pnpm(context, spec, root, pick)
-  local lock = spec.pnpm_lock
+--- The pinned pnpm, with the mirror's map of the tarballs daukle fetched written beside it.
+local function pnpm_behind_mirror(context, lock)
   local fetched = {}
   for _, entry in ipairs(pins.for_host(lock.entries, context.host)) do
     fetched[#fetched + 1] = { url = entry.url, file = daukle.artifact{ url = entry.url, sha256 = entry.sha256, as = entry.as } }
   end
   daukle.write{ path = pnpm_mirror.MAP_NAME, text = pnpm_mirror.map_json(fetched) }
   local pnpm_root = daukle.provision{ url = lock.pnpm.url, sha256 = lock.pnpm.sha256, as = "pnpm " .. lock.pnpm.version }
-  daukle.exec(root:tool(pick.node), { "./" .. pnpm_mirror.SCRIPT_NAME, pnpm_mirror.MAP_NAME,
-                                      pnpm_root:path("package/bin/pnpm.cjs"), "install", "--frozen-lockfile",
-                                      "--store-dir", "pnpm-store" })
+  return pnpm_root:path("package/bin/pnpm.cjs")
+end
+
+--- Installs exactly the pinned closure, with npm reaching no network: every tarball this host
+--- installs is fetched by daukle against its sha256 and handed to npm's cache, which npm keys
+--- by the lockfile's integrity, so a tarball missing from it fails ENOTCACHED naming it.
+--- Installs a pnpm project's pinned closure with its pinned pnpm, through a loopback mirror of
+--- the tarballs daukle fetched, so `--frozen-lockfile` reaches no network (D-251).
+local function install_with_pnpm(context, spec, root, pick)
+  local pnpm = pnpm_behind_mirror(context, spec.pnpm_lock)
+  daukle.exec(root:tool(pick.node), { "./" .. pnpm_mirror.SCRIPT_NAME, pnpm_mirror.MAP_NAME, pnpm, "install",
+                                      "--frozen-lockfile", "--store-dir", "pnpm-store" })
   return root, pick
 end
 
+--- @implNote a workspace member installs nothing of its own, whatever task asks: the one install
+--- of the workspace is its root's `node:install`, which a member's runs.
 local function install_packages(context, spec)
   local root, pick = provision_node(context, spec)
+  if spec.workspace_root ~= nil then return root, pick end
   if spec.pnpm_lock ~= nil then return install_with_pnpm(context, spec, root, pick) end
   local node, npm = root:tool(pick.node), root:path(pick.npm)
   if spec.lock == nil then
@@ -144,9 +154,68 @@ local function declares_prepare(spec)
   return false
 end
 
+local function package_root(context)
+  return string.match(context.root, "^%.%./%.%./%.%./(.+)$") or "."
+end
+
+local function derived_from_package_root(context)
+  return paths.climb_from(package_root(context)) .. "build/daukle/" .. context.toolchain.name
+end
+
+--- Places this instance's generated files at its package root and, unless `mode` is "place",
+--- links its node_modules there too.
+local function place_at_package_root(context, root, pick, mode)
+  daukle.exec(root:tool(pick.node), { "./" .. links.SCRIPT_NAME, context.root, mode })
+end
+
+local function run_task_of(name)
+  local ok, why = daukle.run_task(name)
+  if not ok then error(name .. " failed: " .. tostring(why), 0) end
+end
+
+--- A workspace member's instance, named as core names an instance it migrated: `node-<dir>`
+--- below the project, every `/` a `-` (D-248).
+local function member_instance(context, member)
+  local root = package_root(context)
+  local directory = root == "." and member or (root .. "/" .. member)
+  return "node-" .. (string.gsub(directory, "/", "-"))
+end
+
+--- The one install of a pnpm workspace, run from its root's own directory once every project's
+--- `package.json`, the workspace file and the lockfile are placed there, with everything pnpm
+--- writes kept under `build/`: each project's modules in its own `build/daukle/node_modules`, the
+--- virtual store and the store in the root's derived directory.
+---
+--- @implNote the root is linked before the install as well as after it: pnpm 10 and 11 write
+--- `node_modules/.pnpm-workspace-state-v1.json` at the workspace root whatever `--modules-dir`
+--- says, and exit 254 when that `node_modules` is a link whose target is gone, as after
+--- `daukle clean`; linked first, the file lands under `build/`.
+local function install_workspace(context, spec, root, pick)
+  if spec.pnpm_lock == nil then
+    error("a pnpm workspace installs the closure daukle/pnpm pins, and this block carries no pins: resolve"
+          .. " them with daukle/pnpm first", 0)
+  end
+  for _, member in ipairs(spec.workspace.members) do run_task_of(member_instance(context, member) .. ":place") end
+  place_at_package_root(context, root, pick)
+  local derived = derived_from_package_root(context)
+  local pnpm = pnpm_behind_mirror(context, spec.pnpm_lock)
+  daukle.exec(root:tool(pick.node), {
+    derived .. "/" .. pnpm_mirror.SCRIPT_NAME, derived .. "/" .. pnpm_mirror.MAP_NAME, pnpm, "install",
+    "--frozen-lockfile", "--config.confirmModulesPurge=false", "--modules-dir", links.WORKSPACE_MODULES_DIR,
+    "--virtual-store-dir", derived .. "/pnpm-virtual-store", "--store-dir", derived .. "/pnpm-store",
+  }, { cwd = package_root(context) })
+  place_at_package_root(context, root, pick)
+end
+
 local function install_and_link(context, spec)
+  if spec.workspace ~= nil then
+    local root, pick = provision_node(context, spec)
+    install_workspace(context, spec, root, pick)
+    return root, pick
+  end
+  if spec.workspace_root ~= nil then run_task_of(spec.workspace_root .. ":install") end
   local root, pick = install_packages(context, spec)
-  daukle.exec(root:tool(pick.node), { "./" .. links.SCRIPT_NAME, context.root })
+  place_at_package_root(context, root, pick)
   return root, pick
 end
 
@@ -156,6 +225,14 @@ daukle.task{
     local spec = settings.read(context)
     install_and_link(context, spec)
     run_prepare(context, spec)
+  end,
+}
+
+daukle.task{
+  name = "node:place",
+  run = function(context)
+    local root, pick = provision_node(context, settings.read(context))
+    place_at_package_root(context, root, pick, "place")
   end,
 }
 
@@ -203,14 +280,6 @@ daukle.task{
     daukle.exec(root:tool(pick.node), { "./" .. tree.SCRIPT_NAME })
   end,
 }
-
-local function package_root(context)
-  return string.match(context.root, "^%.%./%.%./%.%./(.+)$") or "."
-end
-
-local function derived_from_package_root(context)
-  return paths.climb_from(package_root(context)) .. "build/daukle/" .. context.toolchain.name
-end
 
 --[[ @implNote --import is resolved against the working directory, which is the
      package root here, so the resolver is named relative to it and starts with

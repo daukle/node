@@ -248,4 +248,40 @@ function pnpm_workspace.members(workspace, directories)
   return members
 end
 
+local function quoted_scalar(text)
+  return "'" .. string.gsub(text, "'", "''") .. "'"
+end
+
+local function sorted_keys(map)
+  local keys = {}
+  for key in pairs(map) do keys[#keys + 1] = key end
+  table.sort(keys)
+  return keys
+end
+
+local function render_catalog(lines, catalog, indent)
+  for _, name in ipairs(sorted_keys(catalog)) do
+    lines[#lines + 1] = indent .. quoted_scalar(name) .. ": " .. quoted_scalar(catalog[name])
+  end
+end
+
+--- The `pnpm-workspace.yaml` a `{ members, catalog, catalogs }` renders to: each member by its
+--- directory, then the catalogs, in the shapes `parse` reads back.
+function pnpm_workspace.render(workspace)
+  local lines = { "packages:" }
+  for _, member in ipairs(workspace.members) do lines[#lines + 1] = "  - " .. quoted_scalar(member) end
+  if workspace.catalog ~= nil then
+    lines[#lines + 1] = "catalog:"
+    render_catalog(lines, workspace.catalog, "  ")
+  end
+  if workspace.catalogs ~= nil then
+    lines[#lines + 1] = "catalogs:"
+    for _, name in ipairs(sorted_keys(workspace.catalogs)) do
+      lines[#lines + 1] = "  " .. quoted_scalar(name) .. ":"
+      render_catalog(lines, workspace.catalogs[name], "    ")
+    end
+  end
+  return table.concat(lines, "\n") .. "\n"
+end
+
 return pnpm_workspace
