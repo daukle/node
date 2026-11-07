@@ -1,0 +1,2 @@
+"packageManager"
+names pnpm "12.4.2", a release that ships no bin/pnpm.cjs for node to run

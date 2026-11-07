@@ -1,0 +1,2 @@
+packages/b/package.json: "overrides": overrides packages in a pnpm workspace member, and pnpm applies overrides only from the workspace root
+3. Dependencies: `overrides`

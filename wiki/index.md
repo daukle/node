@@ -231,16 +231,22 @@ toolchain cannot.
 **The proof compares dependency trees.** The old project is installed as npm would (with `npm ci`
 when it has a lockfile), or as pnpm would for a pnpm project, and its tree written; the new
 project's `node:tree` must match it byte for byte. A pnpm tree lists every entry of pnpm's virtual
-store, so the whole closure is compared and not only the direct dependencies. A `package-lock.json`
-missing a tarball or digest for some entry is re-resolved rather than pinned as committed, and when
-the fresh closure differs from what the lockfile installed the proof fails: the report says the
-build differs and gives both digests, and both trees are printed so you can compare them.
+store, so the whole closure is compared and not only the direct dependencies. In a pnpm workspace
+the original is installed once, and each root or member lists the store entries its own
+dependencies reach and each workspace project it links by that project's path; the new side
+installs the workspace rebuilt from `daukle.toml` under the root's `build/daukle/<instance>/`.
+A `package-lock.json` missing a tarball or digest for some entry is re-resolved rather than pinned
+as committed, and when the fresh closure differs from what the lockfile installed the proof fails:
+the report says the build differs and names the tree lines only one side has, with both digests.
 
 **After migrating, untrack the old `package.json`.** It was almost certainly committed, and git
 applies ignore rules only to untracked files, so the first `node:install` rewrites a tracked file and
 `git commit -a` would commit the generated copy. Run `git rm --cached package.json` (and
 `git rm -r --cached node_modules` if `node_modules` was tracked, and the same for each
-`nestedPackages` directory's `package.json`), then commit.
+`nestedPackages` directory's `package.json`), then commit. A pnpm workspace's root install places
+`pnpm-workspace.yaml`, `pnpm-lock.yaml` and each member's `package.json` as copies too, so untrack
+those as well: `git rm --cached pnpm-workspace.yaml pnpm-lock.yaml packages/a/package.json`, with
+every member's directory in place of `packages/a`.
 
 ## `node` and `npm`
 

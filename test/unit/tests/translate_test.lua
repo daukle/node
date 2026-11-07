@@ -23,6 +23,22 @@ local function blocked(text, needle)
   end }
 end
 
+local MEMBER = { keeps_file_range = function(range) return range == "file:../a" end }
+
+local function member_keeps(text, key, name, range)
+  return { name = "a workspace member keeps " .. range .. " in " .. text, check = function()
+    local result = translate.package(text, "package.json", MEMBER)
+    if #result.blockers > 0 then return "blocked: " .. joined(result.blockers) end
+    return expect.equal(result.config[key], { [name] = range })
+  end }
+end
+
+local function member_blocked(text, needle)
+  return { name = "a workspace member blocks " .. needle .. " in " .. text, check = function()
+    return expect.contains(joined(translate.package(text, "package.json", MEMBER).blockers), needle)
+  end }
+end
+
 local function resolves(bins, wanted_step)
   return { name = "resolves a command against " .. expect.render(bins), check = function()
     local result = translate.package('{"scripts":{"build":"tsc -p ."}}', "package.json")
@@ -123,6 +139,15 @@ return {
   blocked('{"dependencies":{"a":"user/repo"}}', 'a GitHub "user/repo" shorthand'),
   blocked('{"dependencies":{"a":"user/repo#v1"}}', 'a GitHub "user/repo" shorthand'),
   blocked('{"dependencies":{"a":"github:user/repo"}}', "a git repository"),
+  member_keeps('{"dependencies":{"a":"workspace:*"}}', "packages", "a", "workspace:*"),
+  member_keeps('{"devDependencies":{"a":"workspace:^1.0.0"}}', "devPackages", "a", "workspace:^1.0.0"),
+  member_keeps('{"dependencies":{"x":"catalog:"}}', "packages", "x", "catalog:"),
+  member_keeps('{"dependencies":{"x":"catalog:legacy"}}', "packages", "x", "catalog:legacy"),
+  member_keeps('{"dependencies":{"a":"file:../a"}}', "packages", "a", "file:../a"),
+  member_blocked('{"dependencies":{"x":"file:../../outside"}}', "local paths"),
+  member_blocked('{"dependencies":{"a":"link:../a"}}', "local paths"),
+  member_blocked('{"dependencies":{"a":"../a"}}', "local paths"),
+  member_blocked('{"dependencies":{"a":"npm:workspace-tools@1"}}', "an npm alias"),
   blocked('{"dependencies":{"a":"git+https://x.test/a.git"}}', "a git repository"),
   blocked('{"dependencies":{"a":"https://x.test/a.tgz"}}', "a url, which resolves outside the registry"),
   blocked('{"dependencies":{"a":"npm:@fumadocs/base-ui@16.15.4"}}', "3. Dependencies: dist-tags, git URLs"),

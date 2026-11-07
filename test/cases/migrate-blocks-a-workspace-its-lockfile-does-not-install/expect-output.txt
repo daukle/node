@@ -1,0 +1,3 @@
+pnpm-lock.yaml: does not install the workspace with its own pnpm
+ERR_PNPM_OUTDATED_LOCKFILE
+(surface: NPM-SURFACE.md: 4. Install, lockfile and registry configuration: another package manager's lockfile (`yarn.lock`, `pnpm-lock.yaml`, `bun.lock`, `bun.lockb`))

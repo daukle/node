@@ -1,0 +1,6 @@
+[toolchains.node.workspace.catalog]
+ms = "2.1.3"
+[toolchains.node-packages-b]
+dir = "packages/b"
+workspace = "node"
+ms = "catalog:"

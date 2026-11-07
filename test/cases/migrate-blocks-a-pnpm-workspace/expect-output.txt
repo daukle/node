@@ -1,2 +1,2 @@
 pnpm-workspace.yaml
-declares a pnpm workspace
+declares a pnpm workspace, which this toolchain migrates only for a project that installs with pnpm
