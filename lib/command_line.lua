@@ -21,18 +21,26 @@ end
 local SHELL = 'needs a shell, which this toolchain refuses by design: "%s"'
 local GLOB_CHARACTER = "[%*%?%[%]]"
 
+--- The characters still active inside double quotes in sh (`$`, a backquote, `\`) or in cmd.exe
+--- (`%`, and `!` under delayed expansion), the shells npm hands a script to.
+local DOUBLE_QUOTED_SHELL_CHARACTER = "[%$`\\%%!]"
+
 --- Whether a word holds a shell character other than a glob's `*`, `?`, `[` and `]`.
 local function has_other_shell_character(word)
   return string.find((string.gsub(word, GLOB_CHARACTER, "")), SHELL_CHARACTER) ~= nil
 end
 
---[[ An unquoted glob becomes { glob = word }, expanded at run time as sh does,
-     and a quoted one is the literal word sh passes (D-227).
+--- Whether what a pair of quotes holds reaches the command as written under both shells.
+---
+--- @implNote a single-quoted word is held to the unquoted rule, since cmd.exe does not treat a
+--- single quote as quoting at all (D-257).
+local function is_literal_when_quoted(quote, quoted)
+  if quote == '"' then return string.find(quoted, DOUBLE_QUOTED_SHELL_CHARACTER) == nil end
+  return not has_other_shell_character(quoted)
+end
 
-     @implNote a quoted word is unquoted only when what it quotes holds no
-     other shell character, because npm hands the body to sh on one host and
-     cmd.exe on another, and the two disagree about what a quoted metacharacter
-     does. ]]
+--[[ An unquoted glob becomes { glob = word }, expanded at run time as sh does,
+     and a quoted one is the literal word sh passes (D-227). ]]
 local function words_of(text, allows_passed)
   local words, index, length = {}, 1, #text
   while index <= length do
@@ -49,7 +57,7 @@ local function words_of(text, allows_passed)
       local quoted = string.sub(text, index + 1, closing - 1)
       if allows_passed and character == '"' and quoted == "$@" then
         words[#words + 1] = { passed = true }
-      elseif has_other_shell_character(quoted) then
+      elseif not is_literal_when_quoted(character, quoted) then
         return nil, string.format(SHELL, quoted)
       else
         words[#words + 1] = quoted
