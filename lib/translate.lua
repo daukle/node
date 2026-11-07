@@ -147,7 +147,7 @@ local function is_paired(name, declared)
   return base ~= nil and declared[base] ~= nil
 end
 
-local function translated_script(name, body, declared, where, blockers)
+local function translated_script(name, body, declared, where, blockers, workspace_members)
   local construct = 'scripts."' .. name .. '"'
   if LIFECYCLE[name] then
     blocker(blockers, construct, where, "is an npm lifecycle script, run on an event daukle has"
@@ -175,7 +175,7 @@ local function translated_script(name, body, declared, where, blockers)
   end
   local steps = {}
   for index, words in ipairs(parsed.segments) do
-    local step, why = command_line.step_of(words, declared)
+    local step, why = command_line.step_of(words, declared, workspace_members)
     if step == nil then
       blocker(blockers, construct, where, why, SURFACE.shell)
       return nil
@@ -190,7 +190,7 @@ local function translated_script(name, body, declared, where, blockers)
   return steps
 end
 
-local function translated_scripts(package, where, blockers)
+local function translated_scripts(package, where, blockers, workspace_members)
   local map = package.scripts
   if map == nil then return nil end
   if type(map) ~= "table" or #map > 0 then
@@ -205,7 +205,7 @@ local function translated_scripts(package, where, blockers)
               .. ' the same daukle task "node:%s"', tasks[task], name, task), SURFACE.scripts)
     else
       tasks[task] = name
-      local step = translated_script(name, map[name], map, where, blockers)
+      local step = translated_script(name, map[name], map, where, blockers, workspace_members)
       if step ~= nil then out[name] = step any = true end
     end
   end
@@ -340,7 +340,9 @@ end
 
 --- @param member table|nil for a pnpm workspace member's own run, `{ keeps_file_range }`, which
 --- says whether a `file:` range names a directory inside its workspace.
-local function package(text, where, member)
+--- @param workspace_members table|nil for a workspace root's run, each member's package name mapped
+--- to its directory, which `pnpm --filter <name>` addresses.
+local function package(text, where, member, workspace_members)
   local blockers = {}
   if type(text) == "string" and string.sub(text, 1, 3) == BOM then text = string.sub(text, 4) end
   local ok_text = type(text) == "string" and string.match(text, "^%s*{") ~= nil
@@ -375,7 +377,7 @@ local function package(text, where, member)
       blocker(blockers, '"type"', where, "is neither \"module\" nor \"commonjs\"", SURFACE.type)
     end
   end
-  config.scripts = translated_scripts(parsed, where, blockers)
+  config.scripts = translated_scripts(parsed, where, blockers, workspace_members)
   config.entry = entry_of(parsed, config.scripts ~= nil, where, blockers)
   if is_packed(parsed, config.scripts ~= nil) then config[published.KEY] = published_fields(parsed, raw, where, blockers) end
   local commands = {}

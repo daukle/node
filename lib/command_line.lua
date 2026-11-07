@@ -191,10 +191,40 @@ local function npm_step(words, declared)
   return { script = target, args = args, shorthand = shorthand }
 end
 
+--- The words with pnpm's leading `--filter <name>`, `--filter=<name>` or `-F <name>` taken out, and
+--- the name, or nil when the line selects no project.
+local function without_filter(words)
+  local selector = words[2]
+  local name, from
+  if (selector == "--filter" or selector == "-F") and type(words[3]) == "string" then
+    name, from = words[3], 4
+  elseif type(selector) == "string" and string.sub(selector, 1, 9) == "--filter=" then
+    name, from = string.sub(selector, 10), 3
+  else
+    return words, nil
+  end
+  local kept = { words[1] }
+  for index = from, #words do kept[#kept + 1] = words[index] end
+  return kept, name
+end
+
 --- `pnpm run <script>`, `pnpm test`, `pnpm start` and the `pnpm <script>` shorthand, as a script
---- step. Arguments are refused: pnpm hands every word after the name to the script, `--` included
---- in some releases, so there is no one translation of them.
-local function pnpm_step(words, declared)
+--- step, and either with `--filter <name>`, which runs the script of the workspace member of that
+--- name as that member's own instance. Arguments are refused: pnpm hands every word after the name
+--- to the script, `--` included in some releases, so there is no one translation of them.
+---
+--- @implNote a filtered step does not check the script against `declared`, which are the root's:
+--- the migrator reads the member's own `package.json` for it.
+local function pnpm_step(words, declared, workspace_members)
+  local filter
+  words, filter = without_filter(words)
+  local member
+  if filter ~= nil then
+    member = (workspace_members or {})[filter]
+    if member == nil then
+      return nil, string.format('runs "pnpm --filter %s", which names no workspace member', filter)
+    end
+  end
   local verb = words[2]
   if type(verb) ~= "string" then return nil, 'runs "pnpm" with nothing to run' end
   local target, from = verb, 3
@@ -208,13 +238,13 @@ local function pnpm_step(words, declared)
   elseif PNPM_COMMANDS[verb] or string.sub(verb, 1, 1) == "-" then
     return nil, string.format('runs "pnpm %s", which has no daukle equivalent', verb)
   end
-  if type(target) ~= "string" or not declared[target] then
+  if type(target) ~= "string" or (member == nil and not declared[target]) then
     return nil, string.format('runs "%s", which is not a declared script', tostring(target))
   end
   if words[from] ~= nil then
     return nil, string.format('passes arguments to "%s" through pnpm, which a script step cannot carry yet', target)
   end
-  return { script = target }
+  return { script = target, package = member }
 end
 
 local ASSIGNMENT = "^([%a_][%w_]*)=(.*)$"
@@ -277,7 +307,7 @@ local function generated_word(word)
   return '$@", the passed arguments'
 end
 
-local function step_of(segment, declared)
+local function step_of(segment, declared, workspace_members)
   local env, words = env_prefix(segment)
   local first = words[1]
   if first == nil then
@@ -305,7 +335,7 @@ local function step_of(segment, declared)
   end
   if first == "pnpm" then
     if env ~= nil then return nil, 'sets environment variables for "pnpm", which a script step cannot carry' end
-    return pnpm_step(words, declared)
+    return pnpm_step(words, declared, workspace_members)
   end
   if first == "node" then
     if words[2] == nil then return nil, 'runs "node" with nothing to run' end

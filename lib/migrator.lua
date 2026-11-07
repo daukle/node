@@ -981,14 +981,40 @@ local function install_old_workspace(context, root, pick, pnpm, env)
   return refusal
 end
 
+--- The `name` of the package in `directory`, or nil when it declares none or is not readable JSON.
+local function package_name_in(context, directory)
+  local text = daukle.read(within(context.dir, directory .. "/package.json"))
+  if type(text) == "string" and string.sub(text, 1, 3) == "\239\187\191" then text = string.sub(text, 4) end
+  if string.match(text or "", "^%s*{") == nil then return nil end
+  local name = daukle.json_parse(text).name
+  if type(name) == "string" and name ~= "" then return name end
+  return nil
+end
+
+--- Each addressable member's package name mapped to its directory, for `pnpm --filter <name>`.
+---
+--- @implNote a name two members share is left out: pnpm selects both, and a step runs one.
+local function member_names_of(context, members)
+  local directories, shared = {}, {}
+  for _, directory in ipairs(members) do
+    local name = nested.directory_problem(directory) == nil and package_name_in(context, directory) or nil
+    if name ~= nil then
+      if directories[name] ~= nil then shared[name] = true end
+      directories[name] = directory
+    end
+  end
+  for name in pairs(shared) do directories[name] = nil end
+  return directories
+end
+
 --- The translation of a package, a pnpm workspace member's when `root` is its workspace root.
-local function translation_of(context, root)
+local function translation_of(context, root, workspace_members)
   local where = within(context.dir, "package.json")
   local member = nil
   if root ~= nil then
     member = { keeps_file_range = function(range) return is_inside_workspace(context, root, range) end }
   end
-  local translation = translate.package(daukle.read(where), where, member)
+  local translation = translate.package(daukle.read(where), where, member, workspace_members)
   if root ~= nil then
     translation.root = root
     translation.config[pnpm_workspace.KEY] = root.instance
@@ -1021,6 +1047,7 @@ local function run(context)
   local files = file_facts(context)
   local translation = translation_of(context, workspace_root_of(context))
   local workspace, members, member_refusals = workspace_and_members(context, files, translation)
+  if workspace ~= nil then translation = translation_of(context, nil, member_names_of(context, members)) end
   local instances = take_instances(context, files, members)
   if member_refusals ~= nil then
     for _, refused in ipairs(unplaceable_member_blockers(context, files, members)) do
