@@ -618,10 +618,60 @@ local function run_package(context, files)
   return result(context, translation.config, blockers, owned, lock_text)
 end
 
+--- Every step of a translated script, an attempt's own steps included.
+local function each_step(value, visit)
+  if value[1] ~= nil then
+    for _, step in ipairs(value) do each_step(step, visit) end
+  elseif value.attempt ~= nil then
+    each_step(value.attempt, visit)
+    each_step(value.otherwise, visit)
+  else
+    visit(value)
+  end
+end
+
+local NESTED_SCRIPT_ROW = "5. Scripts: `npm <script> --prefix <dir>`, a nested package's script"
+
+--- A blocker for each `--prefix` step whose directory is not a nested package handed back as an
+--- instance, or whose package declares no such script: the step runs that instance's task (D-255).
+local function nested_script_blockers(context, config, instances, where)
+  local handed_back = {}
+  for _, directory in ipairs(instances) do handed_back[directory] = true end
+  local blockers = {}
+  for name, value in pairs(config.scripts or {}) do
+    each_step(value, function(step)
+      if step.package == nil then return end
+      local directory = within(context.dir, step.package)
+      local why
+      if not handed_back[directory] then
+        why = string.format('runs a script in "%s", which is not a package of its own this migration'
+                            .. ' hands back', step.package)
+      else
+        local declared = daukle.json_parse(daukle.read(directory .. "/package.json")).scripts
+        if type(declared) ~= "table" or declared[step.script] == nil then
+          why = string.format('runs "%s" in "%s", whose package.json declares no such script', step.script,
+                              step.package)
+        end
+      end
+      if why ~= nil then
+        blockers[#blockers + 1] = { construct = 'scripts."' .. name .. '"', where = where, why = why,
+                                    surface = "NPM-SURFACE.md: " .. NESTED_SCRIPT_ROW }
+      end
+    end)
+  end
+  return blockers
+end
+
 local function run(context)
   local files = file_facts(context)
   local instances = take_instances(context, files, declares_workspaces(context, files))
   local answer = run_package(context, files)
+  local config = answer.manifest and answer.manifest.toolchains[context.instance]
+  if config ~= nil then
+    for _, refused in ipairs(nested_script_blockers(context, config, instances, within(context.dir, "package.json"))) do
+      answer.blockers[#answer.blockers + 1] = refused
+    end
+  end
   answer.instances = instances
   return answer
 end

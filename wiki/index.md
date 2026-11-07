@@ -124,7 +124,8 @@ one of:
 | --- | --- |
 | `{ module = "<path>" }` | a module of yours, with the provisioned node |
 | `{ bin = "<package>", args = [...] }` | the command an installed package publishes |
-| `{ script = "<name>" }` | another script declared here |
+| `{ script = "<name>" }` | another script declared here. `shorthand = "test"` records that the package wrote `npm test`, for a packed manifest to render back |
+| `{ script = "<name>", package = "<dir>" }` | the script of the nested package in `<dir>`, run as that package's own task, `node-<dir>:<name>` |
 | `{ remove = [...], recursive = true, force = true }` | deletes paths as `rm -rf` would; without `recursive` a directory is refused, without `force` a missing path is. An optional `flags`, such as `"-Rf"`, keeps how the script spelled them, for a packed manifest to render back |
 | `{ echo = [...] }` | prints its words joined by one space, as `echo` does |
 | `{ node = [...], env = {...} }` | runs the provisioned node with these words as written, flags first, such as `["--test", { glob = "./test/*.test.js" }]`; `--run` is refused |
