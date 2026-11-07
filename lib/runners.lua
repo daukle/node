@@ -72,6 +72,14 @@ function namesAPackage(specifier) {
   return !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(specifier);
 }
 
+// Node resolves a package's own name through the "exports" of the nearest
+// package.json, which at the root is the placed copy carrying them, so that
+// name is left to node: from the derived directory it would not resolve.
+const ownName = __DAUKLE_SELF__;
+function namesThisPackage(specifier) {
+  return ownName !== null && (specifier === ownName || specifier.startsWith(ownName + "/"));
+}
+
 function belongsToThisProject(parentURL) {
   if (typeof parentURL !== "string") return false;
   if (!parentURL.startsWith(projectUnder)) return false;
@@ -105,7 +113,8 @@ if (!inheritedOptions) {
 let resolving = false;
 
 function resolveSpecifier(specifier, context, nextResolve) {
-  if (resolving || !namesAPackage(specifier) || !belongsToThisProject(context.parentURL)) {
+  if (resolving || !namesAPackage(specifier) || namesThisPackage(specifier)
+      || !belongsToThisProject(context.parentURL)) {
     return nextResolve(specifier, context);
   }
   if (hasCondition(context.conditions, "import")) {
@@ -128,9 +137,13 @@ registerHooks({
 });
 ]==]
 
-local function resolver_for(project_type)
-  local literal = project_type == nil and "null" or ('"' .. project_type .. '"')
-  return (string.gsub(RESOLVER, "__DAUKLE_TYPE__", literal))
+--- The resolver for a project of this type, which leaves `own_name` to node when it is given.
+---
+--- @param own_name the packed package's name as its JSON text, or nil when it has no `exports`
+local function resolver_for(project_type, own_name)
+  local type_literal = project_type == nil and "null" or ('"' .. project_type .. '"')
+  local with_type = string.gsub(RESOLVER, "__DAUKLE_TYPE__", type_literal)
+  return (string.gsub(with_type, "__DAUKLE_SELF__", function() return own_name or "null" end))
 end
 
 --[[ @implNote an npm bin shim is nothing but "<node> <package>/<bin field>",
