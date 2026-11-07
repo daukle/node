@@ -934,18 +934,30 @@ local function members_below(context, root, files)
   return below
 end
 
-local PNPM_ENTRY = "migrate-pnpm/node_modules/pnpm/bin/pnpm.cjs"
+local PNPM_BIN_DIR = "migrate-pnpm/node_modules/pnpm/bin"
+local PNPM_BIN_NAME = "pnpm.cjs"
+local PNPM_BIN = "bin/" .. PNPM_BIN_NAME
+local PNPM_ENTRY = PNPM_BIN_DIR .. "/" .. PNPM_BIN_NAME
 
 --- The release the project's `packageManager` names, installed into the derived `migrate-pnpm`.
 ---
 --- @implNote pnpm comes from the registry through the provisioned npm, as corepack would fetch it:
 --- the old side is the original tool's own run, which may reach the network as its `npm ci` does.
+---
+--- @return boolean whether the release ships `PNPM_ENTRY`, the file node runs it from
+---
+--- @implNote pnpm 12.4.2 ships `bin/pnpm.mjs` and a native launcher and no `bin/pnpm.cjs`, which
+--- node would fail to find with no `ERR_PNPM_` line to report.
 local function install_pnpm(context, root, pick, pnpm, env)
   daukle.write{ path = "migrate-pnpm/package.json",
                 text = '{ "private": true, "dependencies": { "pnpm": "' .. pnpm .. '" } }\n' }
   daukle.exec(root:tool(pick.node), { root:path(pick.npm), "install", "--ignore-scripts", "--no-audit", "--no-fund" },
               { cwd = derived(context, "migrate-pnpm"), env = env })
+  return names_in(derived(context, PNPM_BIN_DIR))[PNPM_BIN_NAME] == true
 end
+
+--- The surface row daukle/pnpm's own `packageManager` blockers name.
+local PNPM_RELEASE_SURFACE = "NPM-SURFACE.md: dependencies"
 
 local REMOVE_WORKSPACE_STATE = 'const fs = require("node:fs");'
                                .. ' fs.rmSync("node_modules/.pnpm-workspace-state-v1.json", { force: true });'
@@ -967,8 +979,9 @@ end
 --- store and the store in the root's derived `migrate-workspace`, so nothing is written outside a
 --- `build/daukle` directory.
 ---
---- @return string|nil why pnpm refused the install, its first `ERR_PNPM_` line, or nil once it
---- installed; any other failure, a network one among them, raises
+--- @return table|nil the blocker when the project's pnpm cannot be run or refused the install,
+--- naming its first `ERR_PNPM_` line, or nil once it installed; any other failure, a network one
+--- among them, raises
 ---
 --- @implNote pnpm 10 writes `node_modules/.pnpm-workspace-state-v1.json` at the workspace root
 --- whatever `--modules-dir` says, so a `node_modules` the project did not have is removed again.
@@ -976,7 +989,12 @@ local function install_old_workspace(context, root, pick, pnpm, env, members)
   local had_modules = names_in(context.dir)["node_modules"] == true
   local climb = paths.climb_from(context.dir)
   remove_earlier_install(context, root, pick, members)
-  install_pnpm(context, root, pick, pnpm, env)
+  if not install_pnpm(context, root, pick, pnpm, env) then
+    return { construct = '"packageManager"', where = within(context.dir, "package.json"),
+             why = 'names pnpm "' .. pnpm .. '", a release that ships no ' .. PNPM_BIN .. ' for node to run,'
+                   .. " so the workspace cannot be installed with its own pnpm",
+             surface = PNPM_RELEASE_SURFACE }
+  end
   local install = daukle.exec(root:tool(pick.node), {
     climb .. derived(context, PNPM_ENTRY), "install", "--frozen-lockfile", "--ignore-scripts",
     "--config.confirmModulesPurge=false", "--modules-dir", WORKSPACE_MODULES_DIR,
@@ -993,7 +1011,10 @@ local function install_old_workspace(context, root, pick, pnpm, env, members)
     error("pnpm install of the workspace failed with code " .. install.code .. ": "
           .. (string.match(output, "([^\r\n]+)[\r\n%s]*$") or ""), 0)
   end
-  return refusal
+  return { construct = PNPM_LOCK, where = within(context.dir, PNPM_LOCK),
+           why = "does not install the workspace with its own pnpm, so its members' commands cannot be"
+                 .. " resolved: " .. refusal,
+           surface = "NPM-SURFACE.md: " .. FOREIGN_LOCKFILE_ROW }
 end
 
 --- The `name` of the package in `directory`, or nil when it declares none or is not readable JSON.
@@ -1080,15 +1101,9 @@ local function run(context)
   end
   if workspace ~= nil and #answer.blockers == 0 then
     local root, pick = provision(context, config.version)
-    local refusal = install_old_workspace(context, root, pick, pnpm, npmrc.env(npmrc_of(context, files).config),
+    local refused = install_old_workspace(context, root, pick, pnpm, npmrc.env(npmrc_of(context, files).config),
                                           members)
-    if refusal ~= nil then
-      answer.blockers[#answer.blockers + 1] = {
-        construct = PNPM_LOCK, where = within(context.dir, PNPM_LOCK),
-        why = "does not install the workspace with its own pnpm, so its members' commands cannot be"
-              .. " resolved: " .. refusal,
-        surface = "NPM-SURFACE.md: " .. LOCKFILE_ROW }
-    end
+    if refused ~= nil then answer.blockers[#answer.blockers + 1] = refused end
   end
   answer.instances = instances
   return answer
@@ -1096,7 +1111,9 @@ end
 
 --- The old project installed as pnpm installs it, with the release its `packageManager` names.
 local function install_old_with_pnpm(context, root, pick, pnpm, env)
-  install_pnpm(context, root, pick, pnpm, env)
+  if not install_pnpm(context, root, pick, pnpm, env) then
+    error('pnpm "' .. pnpm .. '" ships no ' .. PNPM_BIN .. " for node to run", 0)
+  end
   daukle.write{ path = "migrate-old/" .. PNPM_LOCK, text = daukle.read(within(context.dir, PNPM_LOCK)) }
   daukle.exec(root:tool(pick.node), { "../" .. PNPM_ENTRY, "install",
                                       "--frozen-lockfile", "--ignore-scripts", "--store-dir", "pnpm-store" },
