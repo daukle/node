@@ -1,5 +1,7 @@
 --- The package.json `node:pack` puts in the tarball, rendered from the toolchain's own keys
 --- (spec 2026-11-06-npm-packing-design.md, ruling 5.2).
+local scripts = daukle.require("lib/scripts")
+
 local published = {}
 
 --- The key holding the consumer-facing fields, each as its raw JSON text.
@@ -42,13 +44,6 @@ local function env_words(env)
   return out
 end
 
-local function remove_flag(step)
-  if step.recursive and step.force then return "-rf" end
-  if step.recursive then return "-r" end
-  if step.force then return "-f" end
-  return nil
-end
-
 local render_list
 
 local function step_words(step)
@@ -59,7 +54,7 @@ local function step_words(step)
     return words
   end
   if step.kind == "remove" then
-    local words = { "rm", remove_flag(step) }
+    local words = { "rm", step.flags or scripts.remove_flag(step.recursive, step.force) }
     for _, path in ipairs(step.paths) do words[#words + 1] = word(path) end
     return words
   end

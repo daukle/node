@@ -52,6 +52,8 @@ return {
   steps("eslint 'src'", { { command = "eslint", args = { "src" } } }),
   steps("rm -rf dist", { { remove = { "dist" }, recursive = true, force = true } }),
   steps("rm -f a.log b.log", { { remove = { "a.log", "b.log" }, force = true } }),
+  steps("rm -Rf dist", { { remove = { "dist" }, recursive = true, force = true, flags = "-Rf" } }),
+  steps("rm -r -f dist", { { remove = { "dist" }, recursive = true, force = true, flags = "-r -f" } }),
   steps("rm dist/*.js", { { remove = { { glob = "dist/*.js" } } } }),
   refuses("rm -i dist", "remove step"),
   refuses("rm -rf", "nothing to remove"),
