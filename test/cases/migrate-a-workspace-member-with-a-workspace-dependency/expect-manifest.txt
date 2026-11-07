@@ -1,5 +1,7 @@
 [toolchains.node.workspace]
-members = ["packages/a", "packages/b"]
+[toolchains.node.workspace.members]
+"packages/a" = "node-packages-a"
+"packages/b" = "node-packages-b"
 [toolchains.node-packages-b]
 dir = "packages/b"
 workspace = "node"

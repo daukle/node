@@ -251,6 +251,10 @@ end
 
 local WORKSPACE_KEYS = { members = true, catalog = true, catalogs = true }
 
+local function is_instance_name(name)
+  return string.match(name, "^[%w][%w%.%_%-]*$") ~= nil
+end
+
 local function workspace_problem(text)
   return '"' .. pnpm_workspace.KEY .. '" ' .. text
 end
@@ -266,7 +270,8 @@ local function checked_catalog(catalog, label)
   return catalog
 end
 
---- A workspace root's `workspace`: its members by directory below it, and its catalogs.
+--- A workspace root's `workspace`: its members, each `{ dir, instance }` sorted by the directory
+--- below the root, and its catalogs.
 local function workspace_of(config)
   local value = config[pnpm_workspace.KEY]
   if value == nil or type(value) == "string" then return nil end
@@ -276,14 +281,19 @@ local function workspace_of(config)
   for key in pairs(value) do
     if not WORKSPACE_KEYS[key] then error(workspace_problem('holds "' .. tostring(key) .. '", which is not "members", "catalog" or "catalogs"'), 0) end
   end
-  local members = value.members
-  if type(members) ~= "table" or #members == 0 then
-    error(workspace_problem('needs "members", the directories of the workspace\'s packages'), 0)
+  if type(value.members) ~= "table" then
+    error(workspace_problem('needs "members", each member\'s directory mapped to its instance'), 0)
   end
-  for _, member in ipairs(members) do
-    if type(member) ~= "string" or not is_project_path(member) or string.find(member, "%c") then
-      error(workspace_problem('"members" names "' .. tostring(member) .. '", which is not a directory inside the project'), 0)
+  local members = {}
+  for _, directory in ipairs(sorted_names(value.members)) do
+    local instance = value.members[directory]
+    if type(directory) ~= "string" or not is_project_path(directory) or string.find(directory, "%c") then
+      error(workspace_problem('"members" names "' .. tostring(directory) .. '", which is not a directory inside the project'), 0)
     end
+    if type(instance) ~= "string" or not is_instance_name(instance) then
+      error(workspace_problem('"members"."' .. directory .. '" is "' .. tostring(instance) .. '", which is not an instance name'), 0)
+    end
+    members[#members + 1] = { dir = directory, instance = instance }
   end
   local catalogs = nil
   if value.catalogs ~= nil then
@@ -299,7 +309,7 @@ end
 local function workspace_root_of(config)
   local value = config[pnpm_workspace.KEY]
   if type(value) ~= "string" then return nil end
-  if string.match(value, "^[%w][%w%.%_%-]*$") == nil then
+  if not is_instance_name(value) then
     error(workspace_problem('names "' .. value .. '", which is not an instance name'), 0)
   end
   return value

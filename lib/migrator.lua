@@ -690,10 +690,21 @@ local function without_workspaces_field(blockers)
   return kept
 end
 
-local function adopt_workspace(translation, workspace, members)
+--- The instance core names for the package in `dir`: `node` at the project root, else
+--- `node-<dir>` with each `/` as `-`.
+local function instance_of(dir)
+  if dir == nil then return "node" end
+  return "node-" .. (string.gsub(dir, "/", "-"))
+end
+
+--- The root's `workspace` key: each member's directory below the root mapped to the instance core
+--- migrates it as, so the root's install runs the instances daukle.toml names.
+local function adopt_workspace(context, translation, workspace, members)
   translation.blockers = without_workspaces_field(translation.blockers)
   for _, refused in ipairs(workspace.blockers) do translation.blockers[#translation.blockers + 1] = refused end
-  translation.config[pnpm_workspace.KEY] = { members = members, catalog = workspace.catalog,
+  local instances = {}
+  for _, member in ipairs(members) do instances[member] = instance_of(within(context.dir, member)) end
+  translation.config[pnpm_workspace.KEY] = { members = instances, catalog = workspace.catalog,
                                              catalogs = workspace.catalogs }
 end
 
@@ -702,7 +713,7 @@ local function run_package(context, files, translation, workspace, members)
   local boundaries, boundary_files = take_boundaries(context, files)
   translation.config[nested.KEY] = boundaries
   files.installs_with_pnpm = is_pnpm_project(files, translation.config)
-  if workspace ~= nil then adopt_workspace(translation, workspace, members) end
+  if workspace ~= nil then adopt_workspace(context, translation, workspace, members) end
   for _, refused in ipairs(pnpm_blockers(context, files, translation.config, where)) do
     translation.blockers[#translation.blockers + 1] = refused
   end
@@ -842,13 +853,6 @@ end
 
 local function parent_of(dir)
   return string.match(dir, "^(.+)/[^/]+$")
-end
-
---- The instance core names for the package in `dir`: `node` at the project root, else
---- `node-<dir>` with each `/` as `-`.
-local function instance_of(dir)
-  if dir == nil then return "node" end
-  return "node-" .. (string.gsub(dir, "/", "-"))
 end
 
 local function relative_to(dir, path)

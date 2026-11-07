@@ -110,9 +110,6 @@ local function pnpm_behind_mirror(context, lock)
   return pnpm_root:path("package/bin/pnpm.cjs")
 end
 
---- Installs exactly the pinned closure, with npm reaching no network: every tarball this host
---- installs is fetched by daukle against its sha256 and handed to npm's cache, which npm keys
---- by the lockfile's integrity, so a tarball missing from it fails ENOTCACHED naming it.
 --- Installs a pnpm project's pinned closure with its pinned pnpm, through a loopback mirror of
 --- the tarballs daukle fetched, so `--frozen-lockfile` reaches no network (D-251).
 local function install_with_pnpm(context, spec, root, pick)
@@ -122,6 +119,10 @@ local function install_with_pnpm(context, spec, root, pick)
   return root, pick
 end
 
+--- Installs exactly the pinned closure, with npm reaching no network: every tarball this host
+--- installs is fetched by daukle against its sha256 and handed to npm's cache, which npm keys
+--- by the lockfile's integrity, so a tarball missing from it fails ENOTCACHED naming it.
+---
 --- @implNote a workspace member installs nothing of its own, whatever task asks: the one install
 --- of the workspace is its root's `node:install`, which a member's runs.
 local function install_packages(context, spec)
@@ -173,12 +174,22 @@ local function run_task_of(name)
   if not ok then error(name .. " failed: " .. tostring(why), 0) end
 end
 
---- A workspace member's instance, named as core names an instance it migrated: `node-<dir>`
---- below the project, every `/` a `-` (D-248).
-local function member_instance(context, member)
-  local root = package_root(context)
-  local directory = root == "." and member or (root .. "/" .. member)
-  return "node-" .. (string.gsub(directory, "/", "-"))
+local function place_member(member)
+  local ok, why = daukle.run_task(member.instance .. ":place")
+  if ok then return end
+  error(string.format('workspace.members."%s" names the instance "%s", and its place task failed: %s',
+                      member.dir, member.instance, tostring(why)), 0)
+end
+
+--- Refuses a member its root's `workspace.members` does not list, which pnpm installed nothing for.
+local function refuse_an_unlisted_member(context, spec)
+  local placements = daukle.json_parse(daukle.read("build/daukle/" .. spec.workspace_root .. "/" .. links.WORKSPACE_NAME))
+  for _, instance in ipairs(placements.members or {}) do
+    if instance == context.toolchain.name then return end
+  end
+  error(string.format('this block names "%s" as its workspace root, and that root\'s workspace.members does'
+                      .. ' not list "%s", so the workspace install placed nothing for it', spec.workspace_root,
+                      context.toolchain.name), 0)
 end
 
 --- The one install of a pnpm workspace, run from its root's own directory once every project's
@@ -190,12 +201,17 @@ end
 --- `node_modules/.pnpm-workspace-state-v1.json` at the workspace root whatever `--modules-dir`
 --- says, and exit 254 when that `node_modules` is a link whose target is gone, as after
 --- `daukle clean`; linked first, the file lands under `build/`.
+---
+--- @implNote `confirmModulesPurge=false` because pnpm 10.34.9 and 11.25.0, finding a modules
+--- directory laid out for another virtual store or release, ask before purging it and without a
+--- TTY exit 1 with ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY instead (measured in Docker by moving
+--- `--virtual-store-dir` between two installs; 8.9.2 prompts and proceeds).
 local function install_workspace(context, spec, root, pick)
   if spec.pnpm_lock == nil then
     error("a pnpm workspace installs the closure daukle/pnpm pins, and this block carries no pins: resolve"
           .. " them with daukle/pnpm first", 0)
   end
-  for _, member in ipairs(spec.workspace.members) do run_task_of(member_instance(context, member) .. ":place") end
+  for _, member in ipairs(spec.workspace.members) do place_member(member) end
   place_at_package_root(context, root, pick)
   local derived = derived_from_package_root(context)
   local pnpm = pnpm_behind_mirror(context, spec.pnpm_lock)
@@ -213,7 +229,10 @@ local function install_and_link(context, spec)
     install_workspace(context, spec, root, pick)
     return root, pick
   end
-  if spec.workspace_root ~= nil then run_task_of(spec.workspace_root .. ":install") end
+  if spec.workspace_root ~= nil then
+    run_task_of(spec.workspace_root .. ":install")
+    refuse_an_unlisted_member(context, spec)
+  end
   local root, pick = install_packages(context, spec)
   place_at_package_root(context, root, pick)
   return root, pick

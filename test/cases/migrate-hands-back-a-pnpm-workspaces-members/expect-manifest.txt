@@ -1,5 +1,6 @@
 [toolchains.node.workspace]
-members = ["packages/a"]
+[toolchains.node.workspace.members]
+"packages/a" = "node-packages-a"
 [toolchains.node.workspace.catalog]
 react = "^18.2.0"
 [toolchains.node.workspace.catalogs.legacy]

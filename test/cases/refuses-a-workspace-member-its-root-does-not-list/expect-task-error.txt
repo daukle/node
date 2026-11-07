@@ -1,0 +1,1 @@
+that root's workspace.members does not list "node-packages-c"

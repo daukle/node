@@ -355,7 +355,8 @@ local SCRIPT = (string.gsub(TEMPLATE, "__DAUKLE_([%u_]+)__", {
 
 --- The placements `__daukle_workspace__.json` carries: for a workspace root, the rendered workspace
 --- file and the lockfile, placed at the root as marked copies, since pnpm reads both there; for a
---- root or a member, the modules directory pnpm installs it into.
+--- root or a member, the modules directory pnpm installs it into; for a root, also the member
+--- instances, which a member reads to know its root installed it.
 ---
 --- @implNote the lockfile is placed rather than read through `--lockfile-dir`: pnpm 8.9.2, 10.34.9
 --- and 11.25.0 each key a lockfile's importers by their path from its directory, so a lockfile in
@@ -363,8 +364,10 @@ local SCRIPT = (string.gsub(TEMPLATE, "__DAUKLE_([%u_]+)__", {
 local function workspace_json(spec)
   if spec.workspace ~= nil then
     local lockfile = spec.pnpm_lock ~= nil and ', "pnpm-lock.yaml": "pnpm-lock.yaml"' or ""
-    return '{ "modules": "' .. WORKSPACE_MODULES_DIR .. '", "files": { "pnpm-workspace.yaml": "'
-           .. WORKSPACE_FILE_NAME .. '"' .. lockfile .. ' } }\n'
+    local instances = {}
+    for index, member in ipairs(spec.workspace.members) do instances[index] = json_string(member.instance) end
+    return '{ "modules": "' .. WORKSPACE_MODULES_DIR .. '", "members": [' .. table.concat(instances, ", ")
+           .. '], "files": { "pnpm-workspace.yaml": "' .. WORKSPACE_FILE_NAME .. '"' .. lockfile .. ' } }\n'
   end
   if spec.workspace_root ~= nil then return '{ "modules": "' .. WORKSPACE_MODULES_DIR .. '" }\n' end
   return "{}\n"

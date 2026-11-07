@@ -10,8 +10,9 @@ node = "./plugins/node"
 [toolchains.node]
 version = "26.3.1"
 
-[toolchains.node.workspace]
-members = ["packages/a", "packages/b"]
+[toolchains.node.workspace.members]
+"packages/a" = "node-packages-a"
+"packages/b" = "node-packages-b"
 
 [toolchains.node-packages-a]
 version = "26.3.1"
