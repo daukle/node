@@ -98,6 +98,10 @@ return {
   matches(".b/*", ".b/c", true),
   renders("renders each member and no catalog", { members = { { dir = "packages/a" }, { dir = "packages/b" } } },
           "packages:\n  - 'packages/a'\n  - 'packages/b'\n"),
+  renders("renders no members as an empty list", { members = {} }, "packages: []\n"),
+  { name = "reads no rendered members back", check = function()
+    return expect.equal(pnpm_workspace.read(pnpm_workspace.render({ members = {} })).packages, {})
+  end },
   renders("renders the catalogs sorted", RENDERED,
           "packages:\n  - 'packages/a'\n  - 'packages/it''s'\ncatalog:\n  '@types/node': '20.0.0'\n  'react': '^18.2.0'\n"
           .. "catalogs:\n  'legacy':\n    'react': '^17.0.2'\n"),

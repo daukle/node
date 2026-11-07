@@ -268,7 +268,7 @@ end
 --- The `pnpm-workspace.yaml` a `{ members, catalog, catalogs }` renders to: each member, a
 --- `{ dir }`, by its directory, then the catalogs, in the shapes `parse` reads back.
 function pnpm_workspace.render(workspace)
-  local lines = { "packages:" }
+  local lines = { #workspace.members == 0 and "packages: []" or "packages:" }
   for _, member in ipairs(workspace.members) do lines[#lines + 1] = "  - " .. quoted_scalar(member.dir) end
   if workspace.catalog ~= nil then
     lines[#lines + 1] = "catalog:"
