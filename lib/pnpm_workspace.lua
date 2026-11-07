@@ -64,6 +64,7 @@ local function value_of(text)
   end
   local bare = string.match(string.gsub(text, "%s+#.*$", ""), "^(.-)%s*$")
   if bare == "" or string.match(bare, "^[%[{&*|>!%%@`#]") then return nil end
+  if string.sub(bare, -1) == ":" or string.find(bare, ": ", 1, true) then return nil end
   return bare
 end
 
@@ -134,7 +135,7 @@ local function read_top_level(workspace, state, line)
 end
 
 local function read_package_glob(workspace, line)
-  local item = string.match(line, "^%s+%-%s+(.-)$")
+  local item = string.match(line, "^%s*%-%s+(.-)$")
   local value = item and value_of(item)
   if value == nil then return false end
   add_glob(workspace, value)
@@ -176,6 +177,8 @@ end
 local function read_line(workspace, state, line)
   if string.match(line, "^[ ]*\t") then return false end
   if is_blank(line) then return true end
+  if string.match(line, "^%-%s") and state.section == "unknown" then return true end
+  if string.match(line, "^%-%s") and state.section == "packages" then return read_package_glob(workspace, line) end
   if string.match(line, "^%s") == nil then return read_top_level(workspace, state, line) end
   return state.section ~= nil and read_nested(workspace, state, line)
 end
@@ -211,10 +214,33 @@ local function matches_any(patterns, directory)
   return false
 end
 
+--- The segments pnpm never finds a member below, `@pnpm/fs.find-packages`'s `DEFAULT_IGNORE`.
+local IGNORED_SEGMENTS = { node_modules = true, bower_components = true, test = true, tests = true }
+
+local function is_ignored(directory)
+  for segment in string.gmatch(directory, "[^/]+") do
+    if IGNORED_SEGMENTS[segment] then return true end
+  end
+  return false
+end
+
+--- Each `packages` glob, `!` included, that holds a brace set, which pnpm expands and this does not.
+function pnpm_workspace.brace_globs(workspace)
+  local found = {}
+  for _, pattern in ipairs(workspace.packages or {}) do
+    if string.find(pattern, "{", 1, true) then found[#found + 1] = pattern end
+  end
+  for _, pattern in ipairs(workspace.excluded or {}) do
+    if string.find(pattern, "{", 1, true) then found[#found + 1] = "!" .. pattern end
+  end
+  return found
+end
+
 function pnpm_workspace.members(workspace, directories)
   local members = {}
   for _, directory in ipairs(directories) do
-    if matches_any(workspace.packages, directory) and not matches_any(workspace.excluded, directory) then
+    if matches_any(workspace.packages, directory) and not matches_any(workspace.excluded, directory)
+       and not is_ignored(directory) then
       members[#members + 1] = directory
     end
   end

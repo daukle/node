@@ -576,9 +576,9 @@ local function is_candidate(context, path, is_member)
 end
 
 --- Takes the nested packages of their own out of `facts.nested`, returning their directories for
---- core to migrate as instances of their own (core api 10, D-248), and the same relative to the
---- project. Only the outermost is taken, with every file below it, since its own migration reads
---- the rest. With `members`, a workspace's member directories, only those are taken.
+--- core to migrate as instances of their own (core api 10, D-248). Only the outermost is taken,
+--- with every file below it, since its own migration reads the rest. With `members`, a
+--- workspace's member directories, only those are taken.
 ---
 --- @implNote a workspace's other nested packages are never taken, whether `workspaces` or a
 --- `pnpm-workspace.yaml` declares it: they still block as the nested-package row does.
@@ -602,7 +602,7 @@ local function take_instances(context, facts, members)
     if not is_below_any(relative, path) then kept[#kept + 1] = path end
   end
   facts.nested = kept
-  return instances, relative
+  return instances
 end
 
 local function declares_workspaces(context, files)
@@ -631,7 +631,33 @@ local function pnpm_workspace_of(context, files, config)
     workspace.blockers[#workspace.blockers + 1] = { construct = key, where = where, surface = surface,
                                                     why = "is a workspace setting this toolchain does not carry over" }
   end
+  for _, pattern in ipairs(pnpm_workspace.brace_globs(workspace)) do
+    workspace.blockers[#workspace.blockers + 1] = { construct = pattern, where = where, surface = surface,
+                                                    why = "is a packages glob with a brace set, which pnpm expands"
+                                                          .. " and this toolchain does not, so its members are unknown" }
+  end
   return workspace
+end
+
+--- A blocker for each member whose directory cannot be an instance of its own, its package.json
+--- taken out of `facts.nested` so that it is not also the nested-package blocker.
+local function unplaceable_member_blockers(context, facts, members)
+  local refused, blockers = {}, {}
+  for _, directory in ipairs(members) do
+    local problem = nested.directory_problem(directory)
+    if problem ~= nil then
+      refused[directory .. "/package.json"] = true
+      blockers[#blockers + 1] = { construct = directory, where = within(context.dir, directory .. "/package.json"),
+                                  why = "is a workspace member whose directory " .. problem,
+                                  surface = "NPM-SURFACE.md: " .. package_fields.ROWS.workspaces }
+    end
+  end
+  local kept = {}
+  for _, path in ipairs(facts.nested) do
+    if not refused[path] then kept[#kept + 1] = path end
+  end
+  facts.nested = kept
+  return blockers
 end
 
 --- The translation's blockers without the one the `"workspaces"` field raises: beside a
@@ -791,8 +817,13 @@ local function run(context)
   elseif declares_workspaces(context, files) then
     members = {}
   end
-  local instances, relative = take_instances(context, files, members)
-  local answer = run_package(context, files, translation, workspace, relative)
+  local instances = take_instances(context, files, members)
+  if workspace ~= nil then
+    for _, refused in ipairs(unplaceable_member_blockers(context, files, members)) do
+      workspace.blockers[#workspace.blockers + 1] = refused
+    end
+  end
+  local answer = run_package(context, files, translation, workspace, members)
   local config = answer.manifest and answer.manifest.toolchains[context.instance]
   if config ~= nil then
     for _, refused in ipairs(nested_script_blockers(context, config, instances, within(context.dir, "package.json"))) do

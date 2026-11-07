@@ -1,0 +1,1 @@
+packages/a..b: is a workspace member whose directory is not a relative path below the package root

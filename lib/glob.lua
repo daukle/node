@@ -3,8 +3,7 @@
 --- section 5).
 ---
 --- @implNote `sh` semantics on every host, because the reference builds ran
---- under `sh`; cmd.exe would have passed the pattern through unexpanded. `**`
---- is `*`, as `sh` without globstar reads it.
+--- under `sh`; cmd.exe would have passed the pattern through unexpanded.
 local glob = {}
 
 local GLOB_CHARACTER = "[%*%?%[]"
@@ -53,20 +52,33 @@ local function components_of(text)
   return components
 end
 
+local function is_hidden(component)
+  return string.sub(component, 1, 1) == "."
+end
+
+local function component_matches(pattern, component)
+  if is_hidden(component) and not is_hidden(pattern) then return false end
+  return string.match(component, lua_pattern_of(pattern)) ~= nil
+end
+
 local function components_match(pattern, path, pattern_index, path_index)
   if pattern_index > #pattern then return path_index > #path end
   if pattern[pattern_index] == "**" then
     for skipped = path_index, #path + 1 do
       if components_match(pattern, path, pattern_index + 1, skipped) then return true end
+      if skipped <= #path and is_hidden(path[skipped]) then return false end
     end
     return false
   end
-  return path_index <= #path and string.match(path[path_index], lua_pattern_of(pattern[pattern_index])) ~= nil
+  return path_index <= #path and component_matches(pattern[pattern_index], path[path_index])
          and components_match(pattern, path, pattern_index + 1, path_index + 1)
 end
 
 --- Whether a relative path matches a pattern, `*` and `?` within one component and a `**`
 --- component spanning any number of them, as pnpm reads a workspace's `packages` globs.
+---
+--- @implNote unlike `expand`, `**` is globstar here, and a wildcard never matches a component
+--- that begins with `.`, which is tinyglobby's `dot: false`, the default pnpm leaves in place.
 function glob.matches(pattern, path)
   return components_match(components_of(pattern), components_of(path), 1, 1)
 end
@@ -110,6 +122,8 @@ end
 
 --- The paths `pattern` names under `root` (a directory relative to the project),
 --- sorted, as `sh` would pass them; the pattern itself when it names nothing.
+---
+--- @implNote `**` is `*`, as `sh` without globstar reads it.
 function glob.expand(root, pattern)
   local components = components_of(pattern)
   local candidates = { "" }
