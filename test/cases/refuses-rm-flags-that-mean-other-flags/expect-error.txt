@@ -1,0 +1,1 @@
+has "flags" that are not rm flag words meaning its "recursive" and "force"

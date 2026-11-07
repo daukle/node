@@ -1,4 +1,6 @@
-local SHELL_CHARACTER = "[|;<>$`*?(){}~\\&!#%%%^%[%]]"
+local scripts = daukle.require("lib/scripts")
+
+local SHELL_CHARACTER ="[|;<>$`*?(){}~\\&!#%%%^%[%]]"
 local SHELL_WORDS = { cd = true, rm = true, cp = true, mv = true, mkdir = true,
                       set = true, export = true, cat = true, test = true,
                       exec = true, time = true, exit = true, ["true"] = true, ["false"] = true,
@@ -186,12 +188,13 @@ end
 
 --- `rm` and its flags as a remove step, as `rm` reads them.
 local function remove_step(words)
-  local step = { remove = {} }
+  local step, flag_words = { remove = {} }, {}
   for index = 2, #words do
     local word = words[index]
     if type(word) == "string" and string.match(word, "^%-[rRf]+$") then
       if string.find(word, "[rR]") then step.recursive = true end
       if string.find(word, "f", 1, true) then step.force = true end
+      flag_words[#flag_words + 1] = word
     elseif type(word) == "string" and string.sub(word, 1, 1) == "-" then
       return nil, string.format('passes "%s" to rm, which a remove step cannot carry', word)
     else
@@ -199,6 +202,8 @@ local function remove_step(words)
     end
   end
   if #step.remove == 0 then return nil, 'runs "rm" with nothing to remove' end
+  local spelled = table.concat(flag_words, " ")
+  if spelled ~= (scripts.remove_flag(step.recursive, step.force) or "") then step.flags = spelled end
   return step
 end
 

@@ -1,0 +1,7 @@
+{
+  "name": "demo-rm-flags",
+  "version": "1.0.0",
+  "main": "lib/index.js",
+  "files": ["lib"],
+  "scripts": { "clean": "rm -Rf dist" }
+}
