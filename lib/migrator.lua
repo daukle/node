@@ -10,6 +10,7 @@ local published = daukle.require("lib/published")
 local scripts = daukle.require("lib/scripts")
 local nested = daukle.require("lib/nested")
 local package_fields = daukle.require("lib/package_fields")
+local frontend_pom = daukle.require("lib/frontend_pom")
 
 local PROBE_NAME = "__daukle_probe__.mjs"
 
@@ -233,6 +234,7 @@ end
 local NPM_CONFIGURATION = "configures npm in a way this toolchain does not carry over"
 local VERSION_FILES = { ".nvmrc", ".node-version" }
 local VERSION_FILE_ROW = "1. The runtime: a node version file (`.nvmrc`, `.node-version`)"
+local FRONTEND_ROW = "1. The runtime: a node `frontend-maven-plugin` installs (`nodeVersion`)"
 
 local function first_line(text)
   for line in string.gmatch(text or "", "[^\r\n]+") do
@@ -253,35 +255,84 @@ local function contains(list, value)
   return false
 end
 
---- The candidates narrowed by each node version file, read with nvm's meaning: a partial version
---- is the newest matching release and an exact one is exact; an alias is a blocker (D-242).
-local function narrowed_by_version_files(context, files, candidates)
-  local blockers = {}
+--- Whether even the newest node a version can name is older than the oldest this plugin provisions.
+local function is_below_floor(version)
+  local floor = {}
+  for piece in string.gmatch(runtimes.floor, "%d+") do floor[#floor + 1] = tonumber(piece) end
+  local index = 1
+  for piece in string.gmatch(version, "%d+") do
+    local number = tonumber(piece)
+    if number ~= floor[index] then return number < floor[index] end
+    index = index + 1
+  end
+  return false
+end
+
+local function unsatisfied_why(pin, version)
+  if is_below_floor(version) then
+    return string.format('%s %s, below %s, the oldest node this plugin provisions: its resolver needs'
+                         .. ' module.registerHooks, which older nodes lack', pin.names, pin.text,
+                         runtimes.floor)
+  end
+  return string.format('%s %s, and no pinned node satisfies it together with engines: this plugin'
+                       .. ' pins %s', pin.names, pin.text, pinned_versions())
+end
+
+--- Every node version the project pins outside package.json: each version file, and each
+--- `nodeVersion` a frontend-maven-plugin in the pom.xml beside it installs.
+local function version_pins(context, files)
+  local pins = {}
   for _, name in ipairs(VERSION_FILES) do
     if files.exists[name] then
       local where = within(context.dir, name)
-      local text = first_line(daukle.read(where))
-      local version = text and string.match(text, "^[vV]?(%d+[%.%d]*)$")
-      if version == nil or string.match(version, "^%d+%.?%d*%.?%d*$") == nil then
-        blockers[#blockers + 1] = { construct = name, where = where,
-                                    why = string.format('names "%s", which is an alias a version manager'
-                                          .. ' looks up rather than a version', tostring(text)),
-                                    surface = "NPM-SURFACE.md: " .. VERSION_FILE_ROW }
-      else
-        local allowed = engines.satisfying(version, nil) or {}
-        local kept = {}
-        for _, candidate in ipairs(candidates) do
-          if contains(allowed, candidate) then kept[#kept + 1] = candidate end
-        end
-        if #kept == 0 then
-          blockers[#blockers + 1] = { construct = name, where = where,
-                                      why = string.format('names node %s, and no pinned node satisfies it'
-                                            .. ' together with engines: this plugin pins %s', text,
-                                            pinned_versions()),
-                                      surface = "NPM-SURFACE.md: " .. VERSION_FILE_ROW }
-        end
-        candidates = kept
+      pins[#pins + 1] = { construct = name, where = where, text = first_line(daukle.read(where)),
+                          names = "names node", surface = VERSION_FILE_ROW }
+    end
+  end
+  if files.exists[frontend_pom.NAME] then
+    local where = within(context.dir, frontend_pom.NAME)
+    for _, pin in ipairs(frontend_pom.node_pins(daukle.read(where))) do
+      pins[#pins + 1] = { construct = frontend_pom.CONSTRUCT, where = where, text = pin.version,
+                          unresolved = pin.unresolved, names = "installs node", surface = FRONTEND_ROW }
+    end
+  end
+  return pins
+end
+
+local function pin_problem(pin)
+  if pin.unresolved ~= nil then
+    return string.format('installs node %s, a property this pom does not define, so which node Maven'
+                         .. ' builds the package with is unknown', pin.unresolved)
+  end
+  local version = pin.text and string.match(pin.text, "^[vV]?(%d+[%.%d]*)$")
+  if version == nil or string.match(version, "^%d+%.?%d*%.?%d*$") == nil then
+    return string.format('names "%s", which is an alias a version manager looks up rather than a version',
+                         tostring(pin.text))
+  end
+  return nil, version
+end
+
+--- The candidates narrowed by each node version pin, read with nvm's meaning: a partial version
+--- is the newest matching release and an exact one is exact; an alias is a blocker (D-242).
+local function narrowed_by_version_files(context, files, candidates)
+  local blockers = {}
+  for _, pin in ipairs(version_pins(context, files)) do
+    local problem, version = pin_problem(pin)
+    if problem ~= nil then
+      blockers[#blockers + 1] = { construct = pin.construct, where = pin.where, why = problem,
+                                  surface = "NPM-SURFACE.md: " .. pin.surface }
+    else
+      local allowed = engines.satisfying(version, nil) or {}
+      local kept = {}
+      for _, candidate in ipairs(candidates) do
+        if contains(allowed, candidate) then kept[#kept + 1] = candidate end
       end
+      if #kept == 0 then
+        blockers[#blockers + 1] = { construct = pin.construct, where = pin.where,
+                                    why = unsatisfied_why(pin, version),
+                                    surface = "NPM-SURFACE.md: " .. pin.surface }
+      end
+      candidates = kept
     end
   end
   return candidates, blockers

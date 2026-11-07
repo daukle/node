@@ -225,7 +225,7 @@ what npm can do that this toolchain cannot is `daukle/docs` `NPM-SURFACE.md`; ev
 one of its rows.
 
 - **`run` first lists the package with `daukle.list`** (core `0.11.0`): which of
-  `package-lock.json`, `npm-shrinkwrap.json`, `node_modules`, `.npmrc` (read by `lib/npmrc.lua`, `D-232`), `.nvmrc`, `.node-version`,
+  `package-lock.json`, `npm-shrinkwrap.json`, `node_modules`, `.npmrc` (read by `lib/npmrc.lua`, `D-232`), `.nvmrc`, `.node-version`, `pom.xml`,
   `yarn.lock`, `pnpm-lock.yaml`, `bun.lock` and `bun.lockb` exist, and every `package.json` below the
   root, skipping `node_modules`, `.git`, `build/daukle` and every link. These need no node, so they
   are reported even when translating `package.json` already blocked, and a project learns every
@@ -259,6 +259,12 @@ one of its rows.
   nvm's meaning (`v22` is the newest 22.x, `24.22.1` exactly that) through `lib/engines.lua`'s
   range reader, intersected with `engines`, and the file is owned. An alias (`lts/*`, `node`) is a
   blocker by name, and so is a version no pinned node satisfies.
+- **So does a `frontend-maven-plugin` pin** (`D-237`): each `nodeVersion` in a `pom.xml` beside the
+  package, outside comments, is read the same way, a `${property}` resolved from the pom's own
+  `<properties>`. A plugin whose `workingDirectory` names another directory is not this package's.
+  The pom stays, since it is Maven's. A version below the floor is a blocker that names the floor,
+  as is a property the pom does not define. It is read with patterns rather than `daukle/maven`'s
+  `lib/xml`, so this plugin requires nothing across a plugin boundary.
 - **`prepare` runs where npm runs it** (`D-243`): `node:install` runs it after installing, and
   `node:pack` installs and runs it before staging, so the tarball holds what it builds. The proof's
   old side then packs a copy of the project (`with-scripts` in `lib/pack.lua`, everything but
