@@ -21,7 +21,6 @@ package_fields.ABSENT = {
   workspaces = package_fields.ROWS.workspaces,
   bin = "7. Packing and publishing: the project's own `bin`",
   imports = "2. Module resolution: the project's own `\"imports\"`, `#`-specifiers",
-  publishConfig = "7. Packing and publishing: `publishConfig`",
   config = "5. Scripts: the `config` field",
   os = "3. Dependencies", cpu = "3. Dependencies",
   devEngines = "1. The runtime: `devEngines`",
@@ -33,7 +32,8 @@ package_fields.ABSENT = {
 --- @implNote `engines` is absent on purpose: it is read for `version` AND carried,
 --- because what a package supports is not which node daukle runs (`AUTHORING.md`).
 package_fields.READ = { dependencies = true, devDependencies = true, type = true,
-                        main = true, exports = true, scripts = true, files = true, overrides = true }
+                        main = true, exports = true, publishConfig = true, scripts = true, files = true,
+                        overrides = true }
 
 --- Fields describing the package, which the generated file deliberately leaves out.
 package_fields.METADATA = { name = true, version = true, description = true, license = true, author = true,

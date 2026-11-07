@@ -1,0 +1,2 @@
+demo-publish-config-1.0.0.tgz
+lib/index.js
