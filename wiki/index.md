@@ -125,7 +125,7 @@ one of:
 | `{ module = "<path>" }` | a module of yours, with the provisioned node |
 | `{ bin = "<package>", args = [...] }` | the command an installed package publishes |
 | `{ script = "<name>" }` | another script declared here |
-| `{ remove = [...], recursive = true, force = true }` | deletes paths as `rm -rf` would; without `recursive` a directory is refused, without `force` a missing path is |
+| `{ remove = [...], recursive = true, force = true }` | deletes paths as `rm -rf` would; without `recursive` a directory is refused, without `force` a missing path is. An optional `flags`, such as `"-Rf"`, keeps how the script spelled them, for a packed manifest to render back |
 | `{ echo = [...] }` | prints its words joined by one space, as `echo` does |
 | `{ attempt = [...], otherwise = [...] }` | runs the `attempt` steps, and the `otherwise` steps only when one of them fails, as `a \|\| b` does |
 

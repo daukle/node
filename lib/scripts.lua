@@ -75,14 +75,38 @@ local function checked_env(env, where)
   return env
 end
 
---- A `remove` step: what it deletes, as `rm` would, with its two flags.
+--- The flag word `rm` is written with for these two flags, or nil for neither.
+local function remove_flag(recursive, force)
+  if recursive and force then return "-rf" end
+  if recursive then return "-r" end
+  if force then return "-f" end
+  return nil
+end
+
+local REMOVE_KEYS = { remove = true, recursive = true, force = true, flags = true }
+
+--- Whether `flags`, the words a script spelled rm's flags with, mean exactly these two flags.
+local function spells_the_flags(flags, recursive, force)
+  local spelled_recursive, spelled_force, words = false, false, {}
+  for word in string.gmatch(flags, "%S+") do
+    if not string.match(word, "^%-[rRf]+$") then return false end
+    if string.find(word, "[rR]") then spelled_recursive = true end
+    if string.find(word, "f", 1, true) then spelled_force = true end
+    words[#words + 1] = word
+  end
+  return #words > 0 and table.concat(words, " ") == flags
+         and spelled_recursive == recursive and spelled_force == force
+end
+
+--- A `remove` step: what it deletes, as `rm` would, with its two flags and, where the script
+--- spelled them otherwise than `remove_flag`, that spelling, which a packed manifest renders back.
 local function checked_remove(step, where)
   local paths = checked_args(step.remove, where)
   if #paths == 0 then error(string.format('%s removes nothing', where), 0) end
   for key in pairs(step) do
-    if key ~= "remove" and key ~= "recursive" and key ~= "force" then
-      error(string.format('"%s" is not a key a remove step knows, in %s: it takes "recursive"'
-                          .. ' and "force"', key, where), 0)
+    if not REMOVE_KEYS[key] then
+      error(string.format('"%s" is not a key a remove step knows, in %s: it takes "recursive",'
+                          .. ' "force" and "flags"', key, where), 0)
     end
   end
   for _, flag in ipairs({ "recursive", "force" }) do
@@ -90,7 +114,13 @@ local function checked_remove(step, where)
       error(string.format('%s has a "%s" that is not true or false', where, flag), 0)
     end
   end
-  return { kind = "remove", paths = paths, recursive = step.recursive == true, force = step.force == true }
+  local recursive, force = step.recursive == true, step.force == true
+  if step.flags ~= nil and (type(step.flags) ~= "string"
+                            or not spells_the_flags(step.flags, recursive, force)) then
+    error(string.format('%s has "flags" that are not rm flag words meaning its "recursive" and'
+                        .. ' "force"', where), 0)
+  end
+  return { kind = "remove", paths = paths, recursive = recursive, force = force, flags = step.flags }
 end
 
 local checked_echo, checked_attempt, steps_of
@@ -301,4 +331,4 @@ local function task_scripts(document)
 end
 
 return { read = read, task_scripts = task_scripts, task_name_of = task_name_of,
-         task_name_problem = task_name_problem }
+         task_name_problem = task_name_problem, remove_flag = remove_flag }
