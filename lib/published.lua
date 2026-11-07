@@ -67,7 +67,9 @@ local function step_words(step)
     for _, argument in ipairs(step.args) do words[#words + 1] = word(argument) end
     return words
   end
-  if step.kind == "module" then
+  if step.kind == "node" then
+    words[#words + 1] = "node"
+  elseif step.kind == "module" then
     words[#words + 1] = "node"
     words[#words + 1] = word(step.name)
   else

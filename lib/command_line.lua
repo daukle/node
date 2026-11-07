@@ -268,8 +268,12 @@ local function step_of(segment, declared)
       return nil, string.format(SHELL, generated_word(words[2]) .. ' naming the module')
     end
     if string.sub(words[2], 1, 1) == "-" then
-      return nil, string.format('passes the flag "%s" to node, which a module step cannot carry',
-                                words[2])
+      for _, word in ipairs(words) do
+        if word == "--run" or (type(word) == "string" and string.sub(word, 1, 6) == "--run=") then
+          return nil, 'passes "--run" to node, which runs a script through a shell, refused by design'
+        end
+      end
+      return with_env({ node = rest_of(words, 2) }, env)
     end
     return with_env({ module = words[2], args = rest_of(words, 3) }, env)
   end

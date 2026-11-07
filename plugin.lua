@@ -215,14 +215,22 @@ end
 --[[ @implNote --import is resolved against the working directory, which is the
      package root here, so the resolver is named relative to it and starts with
      "./" or "../" to stay a relative URL rather than a bare specifier. ]]
---- Runs a module on the provisioned node and returns its exit code, so a caller can fall back.
-local function run_module(context, root, pick, module_path, args, env)
+--- Runs the provisioned node with the resolver and these words and returns its exit code, so a
+--- caller can fall back.
+local function run_node(context, root, pick, words, env)
   local derived = derived_from_package_root(context)
   local resolver = (string.sub(derived, 1, 3) == "../" and "" or "./") .. derived .. "/"
                    .. runners.RESOLVER_NAME
-  local argv = { "--import", resolver, module_path }
-  for index = 1, #args do argv[#argv + 1] = args[index] end
+  local argv = { "--import", resolver }
+  for index = 1, #words do argv[#argv + 1] = words[index] end
   return daukle.exec(root:tool(pick.node), argv, { cwd = package_root(context), env = env, check = false }).code
+end
+
+--- Runs a module on the provisioned node and returns its exit code.
+local function run_module(context, root, pick, module_path, args, env)
+  local words = { module_path }
+  for index = 1, #args do words[#words + 1] = args[index] end
+  return run_node(context, root, pick, words, env)
 end
 
 --- A step's arguments with every `{ glob = ... }` expanded against the package root and every
@@ -308,6 +316,9 @@ local function run_step(context, spec, step, extra, passed)
   local root, pick = provision_node(context, spec)
   if step.kind == "module" then
     return run_module(context, root, pick, step.name, expanded(context, joined(step.args, extra), passed), step.env)
+  end
+  if step.kind == "node" then
+    return run_node(context, root, pick, expanded(context, joined(step.args, extra), passed), step.env)
   end
   if step.kind == "remove" then
     local argv = { step.recursive and "1" or "0", step.force and "1" or "0" }
