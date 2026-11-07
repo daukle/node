@@ -822,9 +822,11 @@ local NESTED_SCRIPT_ROW = "5. Scripts: `npm <script> --prefix <dir>`, a nested p
 
 --- A blocker for each `--prefix` step whose directory is not a nested package handed back as an
 --- instance, or whose package declares no such script: the step runs that instance's task (D-255).
-local function nested_script_blockers(context, config, instances, where)
+--- Every workspace member counts as handed back, a member below another member among them.
+local function nested_script_blockers(context, config, instances, members, where)
   local handed_back = {}
   for _, directory in ipairs(instances) do handed_back[directory] = true end
+  for _, member in ipairs(members or {}) do handed_back[within(context.dir, member)] = true end
   local blockers = {}
   for name, value in pairs(config.scripts or {}) do
     each_step(value, function(step)
@@ -1098,7 +1100,8 @@ local function run(context)
   local answer = run_package(context, files, translation, workspace, members)
   local config = answer.manifest and answer.manifest.toolchains[context.instance]
   if config ~= nil then
-    for _, refused in ipairs(nested_script_blockers(context, config, instances, within(context.dir, "package.json"))) do
+    for _, refused in ipairs(nested_script_blockers(context, config, instances, workspace ~= nil and members or nil,
+                                                    within(context.dir, "package.json"))) do
       answer.blockers[#answer.blockers + 1] = refused
     end
   end

@@ -1,0 +1,4 @@
+[toolchains.node.scripts.check]
+script = "check"
+package = "packages/a/sub"
+[toolchains.node-packages-a-sub.scripts.check]
