@@ -1,0 +1,2 @@
+pnpm-workspace.yaml: allowBuilds: is a workspace setting this toolchain does not carry over
+NPM-SURFACE.md: 6. Workspaces

@@ -6,10 +6,11 @@ local pins = daukle.require("lib/pins")
 local pnpm_pins = daukle.require("lib/pnpm_pins")
 local published = daukle.require("lib/published")
 local nested = daukle.require("lib/nested")
+local pnpm_workspace = daukle.require("lib/pnpm_workspace")
 
 local KNOWN_KEYS = { version = true, entry = true, scripts = true, type = true,
                      [package_fields.KEY] = true, [pins.KEY] = true, [pnpm_pins.KEY] = true, [published.KEY] = true,
-                     [nested.KEY] = true }
+                     [nested.KEY] = true, [pnpm_workspace.KEY] = true }
 
 local MOVED_TO_NPM = { packages = true, devPackages = true }
 

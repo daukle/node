@@ -11,6 +11,7 @@ local scripts = daukle.require("lib/scripts")
 local nested = daukle.require("lib/nested")
 local package_fields = daukle.require("lib/package_fields")
 local frontend_pom = daukle.require("lib/frontend_pom")
+local pnpm_workspace = daukle.require("lib/pnpm_workspace")
 
 local PROBE_NAME = "__daukle_probe__.mjs"
 
@@ -405,7 +406,9 @@ local REFUSED_FILES = {
   { name = "pnpm-lock.yaml", why = FOREIGN_LOCKFILE, row = FOREIGN_LOCKFILE_ROW },
   { name = "bun.lock", why = FOREIGN_LOCKFILE, row = FOREIGN_LOCKFILE_ROW },
   { name = "bun.lockb", why = FOREIGN_LOCKFILE, row = FOREIGN_LOCKFILE_ROW },
-  { name = "pnpm-workspace.yaml", why = "declares a pnpm workspace, which daukle/pnpm does not install yet",
+  { name = pnpm_workspace.NAME, why = "declares a pnpm workspace, which this toolchain migrates only for a"
+                                       .. " project that installs with pnpm: a committed pnpm-lock.yaml and a"
+                                       .. " packageManager naming pnpm",
     row = package_fields.ROWS.workspaces },
 }
 
@@ -460,8 +463,10 @@ local function pnpm_blockers(context, files, config, where)
              surface = "NPM-SURFACE.md: " .. FOREIGN_LOCKFILE_ROW } }
 end
 
+local OWNED_BY_A_PNPM_PROJECT = { [PNPM_LOCK] = true, [pnpm_workspace.NAME] = true }
+
 local function is_refused_file(facts, refused)
-  return facts.exists[refused.name] and not (refused.name == PNPM_LOCK and facts.installs_with_pnpm)
+  return facts.exists[refused.name] and not (OWNED_BY_A_PNPM_PROJECT[refused.name] and facts.installs_with_pnpm)
 end
 
 local function file_blockers(context, facts, blockers)
@@ -544,37 +549,60 @@ local function directory_of(path)
   return string.sub(path, 1, #path - #"/package.json")
 end
 
+local function nested_directories(facts)
+  local directories = {}
+  for index, path in ipairs(facts.nested) do directories[index] = directory_of(path) end
+  return directories
+end
+
 local function is_at_or_below(directory, path)
   return path == directory or string.sub(path, 1, #directory + 1) == directory .. "/"
 end
 
---- Takes the nested packages of their own out of `facts.nested`, returning their directories,
---- relative to the project, for core to migrate as instances of their own (core api 10, D-248).
---- Only the outermost is taken, with every file below it, since its own migration reads the rest.
+local function is_below_any(directories, path)
+  for _, taken in ipairs(directories) do
+    if is_at_or_below(taken, path) then return true end
+  end
+  return false
+end
+
+local function is_package_of_its_own(context, path)
+  return not nested.boundary_of(daukle.read(within(context.dir, path)))
+end
+
+local function is_candidate(context, path, is_member)
+  if is_member == nil then return is_package_of_its_own(context, path) end
+  return is_member[directory_of(path)] == true
+end
+
+--- Takes the nested packages of their own out of `facts.nested`, returning their directories for
+--- core to migrate as instances of their own (core api 10, D-248), and the same relative to the
+--- project. Only the outermost is taken, with every file below it, since its own migration reads
+--- the rest. With `members`, a workspace's member directories, only those are taken.
 ---
---- @implNote nothing is taken below a workspace root, whether `workspaces` or a `pnpm-workspace.yaml`
---- declares it: its nested packages are its members, which still block as the workspaces row does.
-local function take_instances(context, facts, declares_workspaces)
-  if declares_workspaces then return {} end
+--- @implNote a workspace's other nested packages are never taken, whether `workspaces` or a
+--- `pnpm-workspace.yaml` declares it: they still block as the nested-package row does.
+local function take_instances(context, facts, members)
+  local is_member = nil
+  if members ~= nil then
+    is_member = {}
+    for _, directory in ipairs(members) do is_member[directory] = true end
+  end
   local instances, relative = {}, {}
   for _, path in ipairs(facts.nested) do
     local directory = directory_of(path)
-    local inside_taken = false
-    for _, taken in ipairs(relative) do inside_taken = inside_taken or is_at_or_below(taken, directory) end
-    if not inside_taken and nested.directory_problem(directory) == nil
-       and not nested.boundary_of(daukle.read(within(context.dir, path))) then
+    if not is_below_any(relative, directory) and nested.directory_problem(directory) == nil
+       and is_candidate(context, path, is_member) then
       relative[#relative + 1] = directory
       instances[#instances + 1] = within(context.dir, directory)
     end
   end
   local kept = {}
   for _, path in ipairs(facts.nested) do
-    local below_taken = false
-    for _, taken in ipairs(relative) do below_taken = below_taken or is_at_or_below(taken, path) end
-    if not below_taken then kept[#kept + 1] = path end
+    if not is_below_any(relative, path) then kept[#kept + 1] = path end
   end
   facts.nested = kept
-  return instances
+  return instances, relative
 end
 
 local function declares_workspaces(context, files)
@@ -585,12 +613,50 @@ local function declares_workspaces(context, files)
   return daukle.json_parse(text).workspaces ~= nil
 end
 
-local function run_package(context, files)
+local WORKSPACE_FIELD = '"workspaces"'
+
+--- The pnpm workspace a project that installs with pnpm declares, or nil when it declares none:
+--- its `packages` globs, its catalogs, and a blocker for each key or line it cannot carry.
+local function pnpm_workspace_of(context, files, config)
+  if not files.exists[pnpm_workspace.NAME] or not is_pnpm_project(files, config) then return nil end
+  local where = within(context.dir, pnpm_workspace.NAME)
+  local workspace, problem = pnpm_workspace.parse(daukle.read(where))
+  local surface = "NPM-SURFACE.md: " .. package_fields.ROWS.workspaces
+  if workspace == nil then
+    return { packages = {}, blockers = { { construct = pnpm_workspace.NAME, where = where, why = problem,
+                                           surface = surface } } }
+  end
+  workspace.blockers = {}
+  for _, key in ipairs(workspace.unknown) do
+    workspace.blockers[#workspace.blockers + 1] = { construct = key, where = where, surface = surface,
+                                                    why = "is a workspace setting this toolchain does not carry over" }
+  end
+  return workspace
+end
+
+--- The translation's blockers without the one the `"workspaces"` field raises: beside a
+--- `pnpm-workspace.yaml`, pnpm ignores the field, so the migration owns and drops it.
+local function without_workspaces_field(blockers)
+  local kept = {}
+  for _, refused in ipairs(blockers) do
+    if refused.construct ~= WORKSPACE_FIELD then kept[#kept + 1] = refused end
+  end
+  return kept
+end
+
+local function adopt_workspace(translation, workspace, members)
+  translation.blockers = without_workspaces_field(translation.blockers)
+  for _, refused in ipairs(workspace.blockers) do translation.blockers[#translation.blockers + 1] = refused end
+  translation.config[pnpm_workspace.KEY] = { members = members, catalog = workspace.catalog,
+                                             catalogs = workspace.catalogs }
+end
+
+local function run_package(context, files, translation, workspace, members)
   local where = within(context.dir, "package.json")
   local boundaries, boundary_files = take_boundaries(context, files)
-  local translation = translate.package(daukle.read(where), where)
   translation.config[nested.KEY] = boundaries
   files.installs_with_pnpm = is_pnpm_project(files, translation.config)
+  if workspace ~= nil then adopt_workspace(translation, workspace, members) end
   for _, refused in ipairs(pnpm_blockers(context, files, translation.config, where)) do
     translation.blockers[#translation.blockers + 1] = refused
   end
@@ -661,6 +727,7 @@ local function run_package(context, files)
   for _, path in ipairs(boundary_files) do owned[#owned + 1] = path end
   if files.exists["package-lock.json"] then owned[#owned + 1] = within(context.dir, "package-lock.json") end
   if files.installs_with_pnpm then owned[#owned + 1] = within(context.dir, PNPM_LOCK) end
+  if workspace ~= nil then owned[#owned + 1] = within(context.dir, pnpm_workspace.NAME) end
   if files.exists["node_modules"] then owned[#owned + 1] = within(context.dir, "node_modules") end
   if files.exists[npmrc.NAME] then owned[#owned + 1] = rc.where end
   for _, name in ipairs(VERSION_FILES) do
@@ -715,8 +782,17 @@ end
 
 local function run(context)
   local files = file_facts(context)
-  local instances = take_instances(context, files, declares_workspaces(context, files))
-  local answer = run_package(context, files)
+  local where = within(context.dir, "package.json")
+  local translation = translate.package(daukle.read(where), where)
+  local workspace = pnpm_workspace_of(context, files, translation.config)
+  local members = nil
+  if workspace ~= nil then
+    members = pnpm_workspace.members(workspace, nested_directories(files))
+  elseif declares_workspaces(context, files) then
+    members = {}
+  end
+  local instances, relative = take_instances(context, files, members)
+  local answer = run_package(context, files, translation, workspace, relative)
   local config = answer.manifest and answer.manifest.toolchains[context.instance]
   if config ~= nil then
     for _, refused in ipairs(nested_script_blockers(context, config, instances, within(context.dir, "package.json"))) do

@@ -12,6 +12,8 @@ importers:
         specifier: 4.3.4
         version: 4.3.4
 
+  packages/a: {}
+
 packages:
 
   debug@4.3.4:
