@@ -123,7 +123,7 @@ local function checked_remove(step, where)
   return { kind = "remove", paths = paths, recursive = recursive, force = force, flags = step.flags }
 end
 
-local checked_echo, checked_attempt, steps_of
+local checked_echo, checked_node, checked_attempt, steps_of
 
 --[[ A step is a ONE-KEY table rather than a command string, so that nothing
      here has to guess where a word ends. A string would also be the place a
@@ -139,6 +139,7 @@ local function checked_step(step, where)
   end
   if step.remove ~= nil then return checked_remove(step, where) end
   if step.echo ~= nil then return checked_echo(step, where) end
+  if step.node ~= nil then return checked_node(step, where) end
   if step.attempt ~= nil or step.otherwise ~= nil then return checked_attempt(step, where) end
   local kind
   for key in pairs(step) do
@@ -179,6 +180,28 @@ function checked_echo(step, where)
     end
   end
   return { kind = "echo", args = checked_args(step.echo, where) }
+end
+
+--- A `node` step: the provisioned node run with these words as written, flags first, which is
+--- what `node --test ./test/*.test.js` was in the script.
+---
+--- @implNote `--run` is refused because it runs a package script through a shell, which is the
+--- boundary every step keeps; the script step is its declarative form.
+function checked_node(step, where)
+  for key in pairs(step) do
+    if key ~= "node" and key ~= "env" then
+      error(string.format('"%s" is not a key a node step knows, in %s: it takes "node" and "env"', key, where), 0)
+    end
+  end
+  local args = checked_args(step.node, where)
+  if #args == 0 then error(string.format('%s runs node with nothing to run', where), 0) end
+  for _, argument in ipairs(args) do
+    if argument == "--run" or (type(argument) == "string" and string.sub(argument, 1, 6) == "--run=") then
+      error(string.format('%s passes "--run" to node, which runs a script through a shell: name the'
+                          .. ' script in a script step instead', where), 0)
+    end
+  end
+  return { kind = "node", args = args, env = checked_env(step.env, where) }
 end
 
 --- An `attempt` step: its `otherwise` steps run when one of its `attempt` steps fails, which is

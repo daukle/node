@@ -127,6 +127,7 @@ one of:
 | `{ script = "<name>" }` | another script declared here |
 | `{ remove = [...], recursive = true, force = true }` | deletes paths as `rm -rf` would; without `recursive` a directory is refused, without `force` a missing path is. An optional `flags`, such as `"-Rf"`, keeps how the script spelled them, for a packed manifest to render back |
 | `{ echo = [...] }` | prints its words joined by one space, as `echo` does |
+| `{ node = [...], env = {...} }` | runs the provisioned node with these words as written, flags first, such as `["--test", { glob = "./test/*.test.js" }]`; `--run` is refused |
 | `{ attempt = [...], otherwise = [...] }` | runs the `attempt` steps, and the `otherwise` steps only when one of them fails, as `a \|\| b` does |
 
 A `module` or `bin` step also takes `env = { NAME = "value" }`, added to the environment it runs in.
