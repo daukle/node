@@ -274,11 +274,11 @@ local function carry_field(config, key, raw, where, blockers)
   config[package_fields.KEY][key] = raw
 end
 
---- Whether `node:pack` publishes this package: where it declares what a tarball holds or what it
---- `exports`, or offers consumers a `main` that is not its own run entry, which only packing gives
---- a meaning (D-238).
+--- Whether `node:pack` publishes this package: where it declares what a tarball holds, what it
+--- `exports` or how it is published, or offers consumers a `main` that is not its own run entry,
+--- which only packing gives a meaning (D-238).
 local function is_packed(parsed, has_scripts)
-  return parsed.files ~= nil or parsed.exports ~= nil
+  return parsed.files ~= nil or parsed.exports ~= nil or parsed.publishConfig ~= nil
          or (parsed.main ~= nil and parsed.private ~= true and has_scripts)
 end
 
@@ -298,7 +298,8 @@ local function published_fields(parsed, raw, where, blockers)
   for _, required in ipairs({ "name", "version" }) do
     if type(parsed[required]) ~= "string" then
       blocker(blockers, '"' .. required .. '"', where, "is missing or not a string, and npm pack names"
-              .. " the tarball of a package that declares \"files\" or \"exports\" or offers a \"main\" by it",
+              .. " the tarball of a package that declares \"files\", \"exports\" or \"publishConfig\""
+              .. " or offers a \"main\" by it",
               SURFACE.publishing)
     end
   end

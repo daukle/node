@@ -212,7 +212,7 @@ toolchain cannot.
   One elsewhere migrates as an instance of its own and blocks only on what it declares.
 - Lifecycle scripts, and a `pre<x>` or `post<x>` beside an `<x>`.
 - `workspaces`, `peerDependencies`, `optionalDependencies`, the project's own `bin`,
-  `imports`, `publishConfig`, a `packageManager` naming anything but pnpm, and the other fields
+  `imports`, a `packageManager` naming anything but pnpm, and the other fields
   `NPM-SURFACE.md` records absent, and a field named with an escape it cannot carry verbatim.
 - An `engines.node` or `engines.npm` range no pinned release satisfies, or one it cannot read, and
   an `engines` that is not a map.

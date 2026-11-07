@@ -272,10 +272,10 @@ one of its rows.
   in `migrate-lockcheck/`. npm 11 refuses some lockfiles npm 10 wrote (`Missing: fsevents@2.3.3
   from lock file`, whisper.cpp's `examples/addon.node`). `build` makes the same choice, since it
   translates again. When no pinned npm accepts the lockfile it is a blocker carrying npm's reason.
-- **A package that declares `"files"` or `"exports"`, or a non-private one with a `main` beside
-  scripts, is PACKED** (`D-238`, spec `2026-11-06-npm-packing-design.md`). Its `name`, `version`,
-  metadata, `main`, `exports` and `files` go into the `package` key as raw JSON text, and its proof is
-  `node:migration-proof`, which runs `node:tree` and `node:pack` and also compares the tarball
+- **A package that declares `"files"`, `"exports"` or `"publishConfig"`, or a non-private one with
+  a `main` beside scripts, is PACKED** (`D-238`, spec `2026-11-06-npm-packing-design.md`). Its
+  `name`, `version`, metadata, `main`, `exports`, `files` and `publishConfig` go into the `package`
+  key as raw JSON text, and its proof is `node:migration-proof`, which runs `node:tree` and `node:pack` and also compares the tarball
   itself, kept as `package.tgz` on both sides, with core's `as = "archive-json"` (api 9): every
   member by its bytes and `package.json` by its parsed value, because the packed manifest is
   rendered from the toolchain's keys and not the author's bytes (`D-250`). The old side is npm's own `npm pack` of the original package. A script the
