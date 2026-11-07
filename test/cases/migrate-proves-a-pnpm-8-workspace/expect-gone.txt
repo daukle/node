@@ -1,0 +1,5 @@
+node_modules
+pnpm-store
+packages/a/node_modules
+packages/b/node_modules
+build/daukle/node/migrate-old/node_modules
