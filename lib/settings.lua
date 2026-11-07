@@ -321,9 +321,8 @@ local function member_packages(config, key)
   return sorted_names(map), map
 end
 
---- @implNote a workspace root's block accepts `workspace:`, `catalog:` and `file:` pins as well,
---- for the root's own dependency on a member (vue's `"@vue/compiler-sfc": "workspace:*"`), since
---- pnpm resolves those inside the workspace rather than from a registry.
+--- @implNote a block carrying `workspace`, a root's or a member's, accepts `workspace:`, `catalog:`
+--- and `file:` pins, which only pnpm resolves, inside the workspace; any other block refuses them.
 local function read(context)
   local config = config_of(context)
   reject_unknown_keys(config)
