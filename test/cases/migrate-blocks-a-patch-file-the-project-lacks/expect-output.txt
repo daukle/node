@@ -1,0 +1,2 @@
+patchedDependencies
+names the patch file "patches/ms@2.1.3.patch", which the project does not hold

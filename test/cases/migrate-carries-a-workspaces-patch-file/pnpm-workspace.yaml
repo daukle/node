@@ -1,0 +1,4 @@
+packages:
+  - 'packages/*'
+patchedDependencies:
+  ms@2.1.3: patches/ms@2.1.3.patch

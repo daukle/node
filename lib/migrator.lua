@@ -698,6 +698,30 @@ end
 
 local WORKSPACE_FIELD = '"workspaces"'
 
+--- @implNote listed rather than read, because `daukle.read` raises on a missing file and the
+--- plugin sandbox has no pcall.
+local function holds_file(context, file)
+  local directory, name = string.match(file, "^(.*)/([^/]+)$")
+  local listed = directory == nil and (context.dir or ".") or within(context.dir, directory)
+  for _, entry in ipairs(daukle.list(listed) or {}) do
+    if entry.name == (name or file) then return true end
+  end
+  return false
+end
+
+--- Why the workspace's `patchedDependencies` cannot be carried, or nil: its entries are unreadable,
+--- or name a file the project does not hold, which pnpm would refuse at install.
+local function patched_dependencies_problem(context, workspace)
+  local patch_files, problem = pnpm_workspace.patch_files(table.concat(workspace.carried, "\n"))
+  if patch_files == nil then return problem end
+  for _, file in ipairs(patch_files) do
+    if not holds_file(context, file) then
+      return 'names the patch file "' .. file .. '", which the project does not hold'
+    end
+  end
+  return nil
+end
+
 --- The pnpm workspace a project that installs with pnpm declares, or nil when it declares none:
 --- its `packages` globs, its catalogs, and a blocker for each key or line it cannot carry.
 local function pnpm_workspace_of(context, files, config)
@@ -715,6 +739,11 @@ local function pnpm_workspace_of(context, files, config)
       workspace.blockers[#workspace.blockers + 1] = { construct = key, where = where, surface = surface,
                                                       why = "is a workspace setting this toolchain does not carry over" }
     end
+  end
+  local patch_problem = patched_dependencies_problem(context, workspace)
+  if patch_problem ~= nil then
+    workspace.blockers[#workspace.blockers + 1] = { construct = pnpm_workspace.PATCHED_DEPENDENCIES, where = where,
+                                                    surface = surface, why = patch_problem }
   end
   for _, pattern in ipairs(pnpm_workspace.brace_globs(workspace)) do
     workspace.blockers[#workspace.blockers + 1] = { construct = pattern, where = where, surface = surface,
