@@ -317,6 +317,17 @@ local function published_fields(parsed, raw, where, blockers)
   return out
 end
 
+--- The `peerDependenciesMeta` object as its raw JSON text, which the resolver renders verbatim.
+local function peer_meta_of(parsed, raw, where, blockers)
+  if parsed.peerDependenciesMeta == nil then return nil end
+  if type(parsed.peerDependenciesMeta) ~= "table" or string.match(raw.peerDependenciesMeta or "", "^{") == nil then
+    blocker(blockers, '"peerDependenciesMeta"', where, "is not an object, and npm reads only an object of"
+            .. " package name to its peer settings", SURFACE.dependencies)
+    return nil
+  end
+  return raw.peerDependenciesMeta
+end
+
 --- The `overrides` object as its raw JSON text, which daukle/npm resolves with verbatim.
 local function overrides_of(parsed, raw, where, blockers)
   if parsed.overrides == nil then return nil end
@@ -370,6 +381,9 @@ local function package(text, where, in_workspace, workspace_members)
   config.overrides = overrides_of(parsed, raw, where, blockers)
   config.packages = dependency_map(parsed, "dependencies", where, blockers, in_workspace)
   config.devPackages = dependency_map(parsed, "devDependencies", where, blockers, in_workspace)
+  config.peerPackages = dependency_map(parsed, "peerDependencies", where, blockers, in_workspace)
+  config.optionalPackages = dependency_map(parsed, "optionalDependencies", where, blockers, in_workspace)
+  config.peerPackagesMeta = peer_meta_of(parsed, raw, where, blockers)
   if parsed.type ~= nil then
     if parsed.type == "module" or parsed.type == "commonjs" then
       config.type = parsed.type

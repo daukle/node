@@ -1,0 +1,1 @@
+"peerPackages" belongs in [toolchains.npm] or [toolchains.pnpm]

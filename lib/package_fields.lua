@@ -13,9 +13,6 @@ package_fields.ROWS = {
 
 --- Fields with no equivalent in this toolchain, each with its surface row.
 package_fields.ABSENT = {
-  peerDependencies = "3. Dependencies: `peerDependencies`",
-  peerDependenciesMeta = "3. Dependencies: `peerDependenciesMeta`",
-  optionalDependencies = "3. Dependencies: `optionalDependencies`",
   bundleDependencies = "3. Dependencies: `bundleDependencies`",
   bundledDependencies = "3. Dependencies: `bundleDependencies`",
   workspaces = package_fields.ROWS.workspaces,
@@ -33,7 +30,8 @@ package_fields.ABSENT = {
 --- because what a package supports is not which node daukle runs (`AUTHORING.md`).
 package_fields.READ = { dependencies = true, devDependencies = true, type = true,
                         main = true, exports = true, publishConfig = true, scripts = true, files = true,
-                        overrides = true }
+                        overrides = true, peerDependencies = true, peerDependenciesMeta = true,
+                        optionalDependencies = true }
 
 --- Fields describing the package, which the generated file deliberately leaves out.
 package_fields.METADATA = { name = true, version = true, description = true, license = true, author = true,

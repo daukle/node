@@ -160,6 +160,8 @@ toolchain cannot.
   `npm_config_*`; the file moves aside.
 - `overrides`, as its JSON text in `[toolchains.npm]`, which the resolve and every install read.
   An `overrides` beside no dependency blocks, since it would have nowhere to go.
+- `peerDependencies`, `optionalDependencies` and `peerDependenciesMeta`, as `peerPackages`,
+  `optionalPackages` and `peerPackagesMeta` in the resolver's block, or in a workspace member's own.
 - `dependencies` and `devDependencies`, as `packages` and `devPackages` in `[toolchains.npm]`,
   pinned from the project's own `package-lock.json` when it is version 2 or later, so the migrated
   project installs exactly what it did, and from a fresh resolve otherwise. Pinning fetches every
@@ -213,7 +215,7 @@ toolchain cannot.
   `node_modules`, `.git` and the derived `build/daukle`, and a directory that search cannot list.
   One elsewhere migrates as an instance of its own and blocks only on what it declares.
 - Lifecycle scripts, and a `pre<x>` or `post<x>` beside an `<x>`.
-- `workspaces`, `peerDependencies`, `optionalDependencies`, the project's own `bin`,
+- `workspaces`, the project's own `bin`,
   `imports`, a `packageManager` naming anything but pnpm, and the other fields
   `NPM-SURFACE.md` records absent, and a field named with an escape it cannot carry verbatim.
 - An `engines.node` or `engines.npm` range no pinned release satisfies, or one it cannot read, and

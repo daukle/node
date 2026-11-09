@@ -1,0 +1,24 @@
+{
+  "name": "demo-pack",
+  "version": "1.2.3",
+  "description": "a package daukle packs",
+  "license": "MIT",
+  "main": "lib/index.js",
+  "files": [
+    "lib"
+  ],
+  "scripts": {
+    "check": "node check.js"
+  },
+  "peerDependencies": {
+    "is-odd": "^3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "is-odd": {
+      "optional": true
+    }
+  },
+  "optionalDependencies": {
+    "is-buffer": "^2.0.5"
+  }
+}

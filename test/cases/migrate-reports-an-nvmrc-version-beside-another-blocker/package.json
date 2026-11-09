@@ -1,1 +1,1 @@
-{"private":true,"peerDependencies":{"a":"1.0.0"}}
+{"private":true,"imports": {"#a": "./a.js"}}
