@@ -1024,25 +1024,32 @@ local function members_below(context, root, files)
 end
 
 local PNPM_BIN_DIR = "migrate-pnpm/node_modules/pnpm/bin"
-local PNPM_BIN_NAME = "pnpm.cjs"
-local PNPM_BIN = "bin/" .. PNPM_BIN_NAME
-local PNPM_ENTRY = PNPM_BIN_DIR .. "/" .. PNPM_BIN_NAME
+local PNPM_BIN_NAMES = { "pnpm.cjs", "pnpm.mjs" }
+
+--- The entry node runs the release installed in `directory` from, or nil when it ships neither.
+---
+--- @implNote pnpm 12 ships `bin/pnpm.mjs`, which starts the native binary npm installed beside it
+--- as an optional dependency, and no `bin/pnpm.cjs`.
+local function pnpm_entry_in(directory)
+  local shipped = names_in(directory .. "/" .. PNPM_BIN_DIR)
+  for _, name in ipairs(PNPM_BIN_NAMES) do
+    if shipped[name] then return PNPM_BIN_DIR .. "/" .. name end
+  end
+  return nil
+end
 
 --- The release the project's `packageManager` names, installed into the derived `migrate-pnpm`.
 ---
 --- @implNote pnpm comes from the registry through the provisioned npm, as corepack would fetch it:
 --- the old side is the original tool's own run, which may reach the network as its `npm ci` does.
 ---
---- @return boolean whether the release ships `PNPM_ENTRY`, the file node runs it from
----
---- @implNote pnpm 12.4.2 ships `bin/pnpm.mjs` and a native launcher and no `bin/pnpm.cjs`, which
---- node would fail to find with no `ERR_PNPM_` line to report.
+--- @return string|nil the entry node runs it from, nil when the release ships none
 local function install_pnpm(context, root, pick, pnpm, env)
   daukle.write{ path = "migrate-pnpm/package.json",
                 text = '{ "private": true, "dependencies": { "pnpm": "' .. pnpm .. '" } }\n' }
   daukle.exec(root:tool(pick.node), { root:path(pick.npm), "install", "--ignore-scripts", "--no-audit", "--no-fund" },
               { cwd = derived(context, "migrate-pnpm"), env = env })
-  return names_in(derived(context, PNPM_BIN_DIR))[PNPM_BIN_NAME] == true
+  return pnpm_entry_in("build/daukle/" .. context.instance)
 end
 
 --- The surface row daukle/pnpm's own `packageManager` blockers name.
@@ -1078,14 +1085,15 @@ local function install_old_workspace(context, root, pick, pnpm, env, members)
   local had_modules = names_in(context.dir)["node_modules"] == true
   local climb = paths.climb_from(context.dir)
   remove_earlier_install(context, root, pick, members)
-  if not install_pnpm(context, root, pick, pnpm, env) then
+  local entry = install_pnpm(context, root, pick, pnpm, env)
+  if entry == nil then
     return { construct = '"packageManager"', where = within(context.dir, "package.json"),
-             why = 'names pnpm "' .. pnpm .. '", a release that ships no ' .. PNPM_BIN .. ' for node to run,'
+             why = 'names pnpm "' .. pnpm .. '", a release that ships no bin/pnpm.cjs or bin/pnpm.mjs for node to run,'
                    .. " so the workspace cannot be installed with its own pnpm",
              surface = PNPM_RELEASE_SURFACE }
   end
   local install = daukle.exec(root:tool(pick.node), {
-    climb .. derived(context, PNPM_ENTRY), "install", "--frozen-lockfile", "--ignore-scripts",
+    climb .. derived(context, entry), "install", "--frozen-lockfile", "--ignore-scripts",
     "--config.confirmModulesPurge=false", "--modules-dir", WORKSPACE_MODULES_DIR,
     "--virtual-store-dir", climb .. derived(context, "migrate-workspace/pnpm-virtual-store"),
     "--store-dir", climb .. derived(context, "migrate-workspace/pnpm-store"),
@@ -1203,11 +1211,10 @@ end
 
 --- The old project installed as pnpm installs it, with the release its `packageManager` names.
 local function install_old_with_pnpm(context, root, pick, pnpm, env)
-  if not install_pnpm(context, root, pick, pnpm, env) then
-    error('pnpm "' .. pnpm .. '" ships no ' .. PNPM_BIN .. " for node to run", 0)
-  end
+  local entry = install_pnpm(context, root, pick, pnpm, env)
+  if entry == nil then error('pnpm "' .. pnpm .. '" ships no bin/pnpm.cjs or bin/pnpm.mjs for node to run', 0) end
   daukle.write{ path = "migrate-old/" .. PNPM_LOCK, text = daukle.read(within(context.dir, PNPM_LOCK)) }
-  daukle.exec(root:tool(pick.node), { "../" .. PNPM_ENTRY, "install",
+  daukle.exec(root:tool(pick.node), { "../" .. entry, "install",
                                       "--frozen-lockfile", "--ignore-scripts", "--store-dir", "pnpm-store" },
               { cwd = derived(context, "migrate-old"), env = env })
 end
@@ -1279,7 +1286,8 @@ local function build(context)
     elseif is_member or is_workspace_root then
       local root_instance = is_member and translation.root.instance or context.instance
       argv[2] = "with-pnpm"
-      table.insert(argv, 4, climb .. "build/daukle/" .. root_instance .. "/" .. PNPM_ENTRY)
+      local root_directory = "build/daukle/" .. root_instance
+      table.insert(argv, 4, climb .. root_directory .. "/" .. pnpm_entry_in(root_directory))
       table.insert(argv, 5, WORKSPACE_MODULES_DIR)
     end
     daukle.exec(root:tool(pick.node), argv, { cwd = context.dir or "." })

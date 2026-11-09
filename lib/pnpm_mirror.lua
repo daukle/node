@@ -33,7 +33,8 @@ const server = createServer((request, response) => {
 server.listen(0, "127.0.0.1", () => {
   const registry = `http://127.0.0.1:${server.address().port}/`;
   const env = { ...process.env, PATH: dirname(process.execPath) + delimiter + (process.env.PATH ?? "") };
-  const child = spawn(process.execPath, [pnpmCli, ...args, "--registry", registry], { stdio: "inherit", env });
+  const command = pnpmCli.endsWith(".cjs") ? [process.execPath, pnpmCli] : [pnpmCli];
+  const child = spawn(command[0], [...command.slice(1), ...args, "--registry", registry], { stdio: "inherit", env });
   child.on("exit", (code, signal) => {
     server.close();
     process.exit(code ?? (signal ? 1 : 0));

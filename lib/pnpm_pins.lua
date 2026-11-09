@@ -21,11 +21,21 @@ local function checked_ranges(ranges, field)
   return names, ranges
 end
 
+local function check_fields(table_of_fields, fields, label)
+  for _, field in ipairs(fields) do
+    if type(table_of_fields[field]) ~= "string" then edited("names a " .. label .. " with no " .. field) end
+  end
+end
+
+--- A release's one tarball, or from pnpm 12 its `binaries`, a native binary per `os/arch`.
 local function checked_pnpm(pnpm)
   if type(pnpm) ~= "table" then edited("has no pnpm") end
-  for _, field in ipairs({ "version", "url", "sha256" }) do
-    if type(pnpm[field]) ~= "string" then edited("names a pnpm with no " .. field) end
+  if type(pnpm.binaries) ~= "table" then
+    check_fields(pnpm, { "version", "url", "sha256" }, "pnpm")
+    return pnpm
   end
+  check_fields(pnpm, { "version" }, "pnpm")
+  for _, binary in pairs(pnpm.binaries) do check_fields(binary, { "url", "sha256", "file" }, "pnpm binary") end
   return pnpm
 end
 

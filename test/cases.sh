@@ -83,8 +83,8 @@ server.serve_forever()
 # catalog names its release beside the staged node plugin.
 NPM_PLUGIN_URL=https://github.com/daukle/npm/releases/download/2.4.1/plugin.lua
 NPM_PLUGIN_SHA256=42569b511744343adb7af083ddc58162085f662719491599d68aa278bf947225
-PNPM_PLUGIN_URL=https://github.com/daukle/pnpm/releases/download/1.3.1/plugin.lua
-PNPM_PLUGIN_SHA256=09f14bab4bc04734439d1cc36df4b87da95d4e49aefeea00d399c008208903e4
+PNPM_PLUGIN_URL=https://github.com/daukle/pnpm/releases/download/1.4.1/plugin.lua
+PNPM_PLUGIN_SHA256=862078394c05ae615c3723d9d292b5535d1d1dff191c4dcaea5ea81e7c7e4e38
 
 serve_plugin() {
   [ -n "${catalog:-}" ] && return 0
