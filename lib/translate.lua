@@ -404,12 +404,16 @@ local function provider_names(providers)
   return table.concat(names, " and ")
 end
 
-local function resolve_commands(config, bins, where)
+--- @param root_bins table|nil for a workspace member, the commands its root's modules provide,
+--- used for a command its own modules do not.
+local function resolve_commands(config, bins, where, root_bins)
   local blockers = {}
   for _, name in ipairs(sorted_keys(config.scripts or {})) do
     for _, step in ipairs(steps_in(config.scripts[name])) do
       if step.command ~= nil then
         local providers = bins[step.command] or {}
+        local from_root = #providers == 0 and root_bins ~= nil and root_bins[step.command] ~= nil
+        if from_root then providers = root_bins[step.command] end
         if #providers == 0 then
           blocker(blockers, 'scripts."' .. name .. '"', where, string.format('runs "%s", which no'
                   .. ' installed package provides', step.command), SURFACE.scripts)
@@ -420,6 +424,7 @@ local function resolve_commands(config, bins, where)
         else
           step.bin = providers[1].name
           step.binName = bin_name_for(step.command, providers[1])
+          step.fromWorkspaceRoot = from_root or nil
           step.command = nil
         end
       end
