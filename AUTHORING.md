@@ -287,7 +287,9 @@ one of its rows.
   key as raw JSON text, and its proof is `node:migration-proof`, which runs `node:tree` and `node:pack` and also compares the tarball
   itself, kept as `package.tgz` on both sides, with core's `as = "archive-json"` (api 9): every
   member by its bytes and `package.json` by its parsed value, because the packed manifest is
-  rendered from the toolchain's keys and not the author's bytes (`D-250`). The old side is npm's own `npm pack` of the original package. A script the
+  rendered from the toolchain's keys and not the author's bytes (`D-250`). The old side is npm's own `npm pack` of the original package, or the project's own `pnpm pack` for a
+  pnpm workspace's root or member. `node:pack` resolves a `workspace:` or `catalog:` range as `pnpm pack` does
+  (`lib/workspace_ranges.lua`), and no tarball carries a `build/daukle/` directory (`D-270`, `D-271`). A script the
   package publishes must render back from its steps to exactly the declared text
   (`lib/published.lua`), or it is a blocker naming it. A script step keeps npm's shorthand
   (`shorthand = "test"` for `npm test`) and a remove step its flag spelling, so both render as

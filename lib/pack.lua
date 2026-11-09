@@ -2,6 +2,7 @@ local links = daukle.require("lib/links")
 
 local SCRIPT_NAME = "__daukle_pack__.mjs"
 local MANIFEST_NAME = "pack-package.json"
+local RESOLVED_MANIFEST_NAME = "pack-package-resolved.json"
 local TARBALL_NAME = "package.tgz"
 local STAGE_DIR = "pack"
 
@@ -14,7 +15,7 @@ local NO_ROOT_MANIFEST = 3
      packlist that disagrees with it at its edges. ]]
 local SCRIPT = [==[
 import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { delimiter, dirname, join, resolve } from "node:path";
 
@@ -49,6 +50,12 @@ const NOT_COPIED = new Set([".git", "node_modules"]);
  *  content: a migrated package packs what it packed before migrating. */
 const DAUKLE_ROOT_ENTRIES = new Set(["daukle.toml", "daukle.lua", "daukle", "daukle.ps1"]);
 
+/** Whether a path lies in a derived directory daukle made, which a `files` entry naming the
+ *  directory around it would otherwise ship. */
+function isDerived(path) {
+  return `/${path}`.includes("/build/daukle/");
+}
+
 /** Copies a project's files, skipping what npm never packs from and daukle's own build directory,
  *  which holds the destination: Node's cpSync refuses a copy into its own subdirectory. */
 function copyTree(source, target, path) {
@@ -68,6 +75,40 @@ function packWithScripts(directory, destination) {
   copyTree(directory, copy, "");
   npm(copy, destination, [existsSync(join(copy, "package-lock.json")) ? "ci" : "install", "--no-audit", "--no-fund"], false);
   return pack(copy, destination, true);
+}
+
+/** The tarball without what `isDerived` names: pnpm has no way to leave a path out of a pack. */
+async function withoutDerived(tarball, stageDirectory) {
+  const tar = createRequire(join(dirname(dirname(npmCli)), "package.json"))("tar");
+  rmSync(stageDirectory, { recursive: true, force: true });
+  mkdirSync(stageDirectory, { recursive: true });
+  await tar.x({ file: tarball, cwd: stageDirectory, filter: (path) => !isDerived(path) });
+  await tar.c({ gzip: true, file: tarball, cwd: stageDirectory }, ["package"]);
+  return tarball;
+}
+
+/** Runs pnpm's pack with `node_modules` in place, where pnpm alone looks for a workspace sibling's
+ *  version: the proof installs elsewhere so that it writes nothing into the author's tree. */
+function runPnpmPack(pnpmEntry, modules, directory, destination) {
+  const link = join(directory, "node_modules");
+  const linked = !existsSync(link);
+  if (linked) symlinkSync(modules, link, "junction");
+  try {
+    return spawnSync(process.execPath, [pnpmEntry, "pack", "--pack-destination", destination],
+      { cwd: directory, stdio: ["ignore", "inherit", "inherit"] });
+  } finally {
+    if (linked) rmSync(link, { force: true });
+  }
+}
+
+/** A workspace package as pnpm packs it, which resolves the ranges npm would leave as written. */
+async function packWithPnpm(pnpmEntry, modules, directory, destination) {
+  for (const name of tarballs(destination)) rmSync(join(destination, name));
+  const result = runPnpmPack(pnpmEntry, modules, directory, destination);
+  if (result.status !== 0) throw new Error(`pnpm pack exited with code ${result.status}`);
+  const made = [...tarballs(destination)];
+  if (made.length !== 1) throw new Error(`pnpm pack left ${made.length} tarballs in ${destination}`);
+  return withoutDerived(join(destination, made[0]), join(destination, "pnpm-pack"));
 }
 
 /** Keeps the tarball under one name on both sides of the proof, whatever npm named it. */
@@ -94,7 +135,17 @@ function stageFile(source, target, file) {
   copyFileSync(source, target);
 }
 
-async function stage(root, manifestPath, stageDirectory, destination) {
+const LICENSE_FILE = /^LICEN[CS]E(\..+)?$/i;
+
+/** The workspace root's license files, which `pnpm pack` adds to a member that ships none. */
+function inheritedLicenses(workspaceRoot, files) {
+  if (workspaceRoot === undefined || files.some((file) => LICENSE_FILE.test(file))) return [];
+  return readdirSync(workspaceRoot, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && LICENSE_FILE.test(entry.name))
+    .map((entry) => entry.name);
+}
+
+async function stage(root, manifestPath, stageDirectory, destination, workspaceRoot) {
   if (!existsSync(join(root, "package.json"))) process.exit(]==] .. NO_ROOT_MANIFEST .. [==[);
   const npm = createRequire(join(dirname(dirname(npmCli)), "package.json"));
   const Arborist = npm("@npmcli/arborist");
@@ -106,17 +157,21 @@ async function stage(root, manifestPath, stageDirectory, destination) {
   rmSync(stageDirectory, { recursive: true, force: true });
   mkdirSync(stageDirectory, { recursive: true });
   for (const file of files) {
-    if (file === "package.json" || DAUKLE_ROOT_ENTRIES.has(file.split("/")[0])) continue;
+    if (file === "package.json" || DAUKLE_ROOT_ENTRIES.has(file.split("/")[0]) || isDerived(file)) continue;
     mkdirSync(dirname(join(stageDirectory, file)), { recursive: true });
     stageFile(join(root, file), join(stageDirectory, file), file);
   }
+  for (const license of inheritedLicenses(workspaceRoot, files)) copyFileSync(join(workspaceRoot, license), join(stageDirectory, license));
   writeFileSync(join(stageDirectory, "package.json"), manifestText);
   record(pack(stageDirectory, destination), destination);
 }
 
 if (mode === "stage") {
-  const [root, manifestPath, stageDirectory, destination] = rest.map((path) => resolve(path));
-  await stage(root, manifestPath, stageDirectory, destination);
+  const [root, manifestPath, stageDirectory, destination, workspaceRoot] = rest.map((path) => resolve(path));
+  await stage(root, manifestPath, stageDirectory, destination, workspaceRoot);
+} else if (mode === "with-pnpm") {
+  const [pnpmEntry, modules, directory, destination] = rest.map((path) => resolve(path));
+  record(await packWithPnpm(pnpmEntry, modules, directory, destination), destination);
 } else if (mode === "in-place") {
   const [directory, destination] = rest.map((path) => resolve(path));
   record(pack(directory, destination), destination);
@@ -129,4 +184,5 @@ if (mode === "stage") {
 ]==]
 
 return { SCRIPT_NAME = SCRIPT_NAME, SCRIPT = SCRIPT, MANIFEST_NAME = MANIFEST_NAME,
+         RESOLVED_MANIFEST_NAME = RESOLVED_MANIFEST_NAME,
          TARBALL_NAME = TARBALL_NAME, STAGE_DIR = STAGE_DIR, NO_ROOT_MANIFEST = NO_ROOT_MANIFEST }

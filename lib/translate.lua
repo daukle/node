@@ -293,6 +293,12 @@ local function carry_identity(config, raw, where, blockers)
   end
 end
 
+--- Whether `pnpm pack` of this release leaves `packageManager` out of the tarball: 8.15.9 keeps
+--- it and 9.0.0, 9.5.0, 9.15.9, 10.0.0, 10.34.9 and 11.25.0 do not.
+local function pnpm_pack_drops_package_manager(pnpm)
+  return pnpm ~= nil and tonumber(string.match(pnpm, "^(%d+)")) >= 9
+end
+
 --- Whether `node:pack` publishes this package: where it declares what a tarball holds, what it
 --- `exports` or how it is published, or offers consumers a `main` that is not its own run entry,
 --- which only packing gives a meaning (D-238).
@@ -403,6 +409,7 @@ local function package(text, where, in_workspace, workspace_members)
   config.entry = entry_of(parsed, config.scripts ~= nil, where, blockers)
   if is_packed(parsed, config.scripts ~= nil) then
     config[published.KEY] = published_fields(parsed, raw, where, blockers)
+    if in_workspace and pnpm_pack_drops_package_manager(config.pnpm) then config[published.KEY].packageManager = nil end
   else
     carry_identity(config, raw, where, blockers)
   end

@@ -1,0 +1,17 @@
+{
+  "name": "outer",
+  "version": "3.1.0",
+  "packageManager": "pnpm@10.34.9",
+  "files": [
+    "dist",
+    "packages/inner"
+  ],
+  "main": "dist/index.js",
+  "dependencies": {
+    "inner": "workspace:*",
+    "caret": "workspace:^",
+    "debug": "catalog:",
+    "renamed": "workspace:caret@*",
+    "exact": "workspace:1.2.3"
+  }
+}

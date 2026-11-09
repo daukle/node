@@ -16,6 +16,7 @@ local pins = daukle.require("lib/pins")
 local npm_launcher = daukle.require("lib/npm_launcher")
 local pack = daukle.require("lib/pack")
 local published = daukle.require("lib/published")
+local workspace_ranges = daukle.require("lib/workspace_ranges")
 local pnpm_mirror = daukle.require("lib/pnpm_mirror")
 local nested = daukle.require("lib/nested")
 local pnpm_workspace = daukle.require("lib/pnpm_workspace")
@@ -277,6 +278,15 @@ daukle.task{
   end,
 }
 
+--- The name of the manifest `node:pack` publishes, written with its workspace ranges resolved in a
+--- task because a sibling's version is another instance's generated file.
+local function publishable_manifest(context, spec)
+  if not workspace_ranges.applies(spec) then return pack.MANIFEST_NAME end
+  daukle.write{ path = pack.RESOLVED_MANIFEST_NAME,
+                text = published.manifest(workspace_ranges.resolved(spec, context.toolchain.name)) }
+  return pack.RESOLVED_MANIFEST_NAME
+end
+
 --[[ @implNote no dependsOn node:install: the migration proof packs while the
      author's package.json is still at the root, where node:install would place
      its own. The stage step exits NO_ROOT_MANIFEST on a root with none, and only
@@ -295,7 +305,8 @@ daukle.task{
       install_packages(context, spec)
       run_prepare(context, spec)
     end
-    local argv = { "./" .. pack.SCRIPT_NAME, "stage", npm, context.root, pack.MANIFEST_NAME, pack.STAGE_DIR, "." }
+    local argv = { "./" .. pack.SCRIPT_NAME, "stage", npm, context.root, publishable_manifest(context, spec), pack.STAGE_DIR, ".",
+                   workspace_ranges.root_of_member(context, spec) }
     local result = daukle.exec(node, argv, { check = false })
     if result.code == pack.NO_ROOT_MANIFEST then
       install_and_link(context, spec)
