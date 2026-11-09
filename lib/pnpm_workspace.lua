@@ -112,11 +112,17 @@ local function flow_globs(text)
 end
 
 --- Reads one unindented line into `workspace`, returning false when it is not a shape this reads.
+--- Whether a zero-indent `key:` is a setting, rather than a flow mapping or a value with a colon.
+local function is_setting(key, rest)
+  return string.match(key, "^%a[%w_%-]*$") ~= nil and (rest == "" or string.match(rest, "^%s") ~= nil)
+end
+
 local function read_top_level(workspace, state, line)
   local key, rest = key_of(line)
   if key == nil then return false end
   state.catalog_name = nil
   if key == "packages" then
+    workspace.declares_packages = true
     state.section = "packages"
     if is_heading(rest) then return true end
     local globs = flow_globs(string.match(rest, "^%s*(.-)$"))
@@ -128,6 +134,7 @@ local function read_top_level(workspace, state, line)
     state.section = key
     workspace[key] = workspace[key] or {}
   else
+    if not is_setting(key, rest) then return false end
     workspace.unknown[#workspace.unknown + 1] = key
     workspace.carried[#workspace.carried + 1] = line
     state.section = "unknown"
@@ -255,17 +262,21 @@ function pnpm_workspace.members(workspace, directories)
   return members
 end
 
---- The settings a rendered workspace file cannot carry: patch files are not in the workspace the
---- tree task rebuilds, and the others move what this toolchain places itself.
-pnpm_workspace.UNCARRIED = { patchedDependencies = true, nodeLinker = true, lockfile = true,
-                             sharedWorkspaceLockfile = true, enableGlobalVirtualStore = true }
+--- The settings a rendered workspace file cannot carry: those naming a file the workspace the tree
+--- task rebuilds does not hold, and those moving what this toolchain places itself.
+pnpm_workspace.UNCARRIED = {
+  patchedDependencies = true, pnpmfile = true, globalPnpmfile = true, onlyBuiltDependenciesFile = true,
+  configDependencies = true,
+  nodeLinker = true, lockfile = true, sharedWorkspaceLockfile = true, enableGlobalVirtualStore = true,
+  modulesDir = true, virtualStoreDir = true, enableModulesDir = true,
+}
 
 --- The problem with a block's `settings` text, or nil: it may hold only what `parse` carries, since
 --- `render` writes it beside the members and catalogs and pnpm refuses a key written twice.
 function pnpm_workspace.settings_problem(text)
   local workspace, problem = pnpm_workspace.parse(text)
   if workspace == nil then return problem end
-  if #workspace.packages > 0 or workspace.catalog ~= nil or workspace.catalogs ~= nil then
+  if workspace.declares_packages or workspace.catalog ~= nil or workspace.catalogs ~= nil then
     return 'holds "packages", "catalog" or "catalogs", which have keys of their own'
   end
   return nil
@@ -290,7 +301,7 @@ end
 --- The range a `catalog:` specifier takes for `package_name`, or nil when `range` is no such
 --- specifier or its catalog does not list the package.
 function pnpm_workspace.catalog_range(workspace, package_name, range)
-  local name = string.match(string.lower(range), "^catalog:(.*)$")
+  local name = string.lower(string.sub(range, 1, 8)) == "catalog:" and string.sub(range, 9) or nil
   local catalog = name and catalog_named(workspace, name)
   return catalog and catalog[package_name] or nil
 end

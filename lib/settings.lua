@@ -270,8 +270,6 @@ local function checked_catalog(catalog, label)
   return catalog
 end
 
---- A workspace root's `workspace`: its members, each `{ dir, instance }` sorted by the directory
---- below the root, and its catalogs.
 local function checked_workspace_settings(text)
   if text == nil then return nil end
   if type(text) ~= "string" then error(workspace_problem('"settings" must be workspace file text'), 0) end
@@ -280,6 +278,8 @@ local function checked_workspace_settings(text)
   return text
 end
 
+--- A workspace root's `workspace`: its members, each `{ dir, instance }` sorted by the directory
+--- below the root, its catalogs, and its settings as workspace file text.
 local function workspace_of(config)
   local value = config[pnpm_workspace.KEY]
   if value == nil or type(value) == "string" then return nil end
