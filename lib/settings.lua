@@ -23,6 +23,9 @@ local WORKSPACE_PREFIXES = { "workspace:", "catalog:", "file:" }
 local WRITTEN = { [links.MARKER_KEY] = true, type = true, private = true, dependencies = true,
                   devDependencies = true }
 
+local WRITTEN_WHEN_PACKED = { name = true, version = true }
+for name in pairs(WRITTEN) do WRITTEN_WHEN_PACKED[name] = true end
+
 local function config_of(context)
   if context.toolchain ~= nil then return context.toolchain.config end
   return context.config
@@ -206,16 +209,17 @@ local function own_name_of(spec)
   return packed.name
 end
 
---- The packed package's `name` and `exports`, which node reads from this file to resolve the
---- package's own name from inside it, as it does in the original.
+--- The packed package's `name` and `version`, which a program reads back from this file, and its
+--- `exports`, by which node resolves the package's own name from inside it, as in the original.
 ---
---- @implNote written only beside `exports`: node self-references through `exports` alone, and a
---- name nobody chose would show up in npm's output as if the project had chosen it. "private" is
---- what stops npm asking for the name and the version a publishable package needs.
-local function self_reference_fields(spec)
-  local own_name = own_name_of(spec)
-  if own_name == nil then return "" end
-  return '  "name": ' .. own_name .. ',\n  "exports": ' .. spec.published.exports .. ',\n'
+--- @implNote "private" is what stops npm treating this file as the publishable manifest, which
+--- `node:pack` renders apart.
+local function packed_identity_fields(spec)
+  local packed = spec.published
+  if packed == nil then return "" end
+  local fields = '  "name": ' .. packed.name .. ',\n  "version": ' .. packed.version .. ',\n'
+  if packed.exports == nil then return fields end
+  return fields .. '  "exports": ' .. packed.exports .. ',\n'
 end
 
 --- @implNote an offline `npm ci` checks each lockfile edge against the package.json beside it,
@@ -244,7 +248,7 @@ local function package_json(spec)
   return '{\n'
     .. '  "' .. links.MARKER_KEY .. '": "' .. links.MARKER_TEXT .. '",\n'
     .. type_line
-    .. self_reference_fields(spec)
+    .. packed_identity_fields(spec)
     .. '  "private": true,\n'
     .. '  "dependencies": ' .. json_object(spec.packages, spec.package_ranges, "  ") .. ',\n'
     .. '  "devDependencies": ' .. json_object(spec.dev_packages, spec.dev_ranges, "  ")
@@ -265,7 +269,7 @@ local function published_of(config)
     local label = '"' .. published.KEY .. "." .. tostring(name) .. '"'
     if not published.FIELDS[name] and name ~= published.SCRIPT_TEXT then
       error(label .. " is not a field this table publishes: it holds the name, version, metadata,"
-            .. ' "main", "exports", "files" and "publishConfig", and every other field has a key of its own', 0)
+            .. ' "main", "exports", "files", "publishConfig" and "packageManager", and every other field has a key of its own', 0)
     end
     if type(text) ~= "string" or not package_fields.is_json_value(text) then
       error(label .. " must be one JSON value as text, such as '\"1.0.0\"'", 0)
@@ -378,7 +382,7 @@ local function read(context)
     pinned.peer_meta = config.peerPackagesMeta
   end
   local declared_scripts = scripts.read(config)
-  local field_names, fields = package_fields.checked(config, WRITTEN)
+  local field_names, fields = package_fields.checked(config, config[published.KEY] == nil and WRITTEN or WRITTEN_WHEN_PACKED)
   return {
     field_names = field_names,
     fields = fields,

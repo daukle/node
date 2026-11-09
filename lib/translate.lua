@@ -285,6 +285,14 @@ local function carry_field(config, key, raw, where, blockers)
   config[package_fields.KEY][key] = raw
 end
 
+--- The name and the version of a package that is not packed, which a program can read back from
+--- its `package.json` and a workspace sibling's dependency tree names.
+local function carry_identity(config, raw, where, blockers)
+  for _, key in ipairs(package_fields.IDENTITY) do
+    if raw[key] ~= nil then carry_field(config, key, raw[key], where, blockers) end
+  end
+end
+
 --- Whether `node:pack` publishes this package: where it declares what a tarball holds, what it
 --- `exports` or how it is published, or offers consumers a `main` that is not its own run entry,
 --- which only packing gives a meaning (D-238).
@@ -393,7 +401,11 @@ local function package(text, where, in_workspace, workspace_members)
   end
   config.scripts = translated_scripts(parsed, where, blockers, workspace_members)
   config.entry = entry_of(parsed, config.scripts ~= nil, where, blockers)
-  if is_packed(parsed, config.scripts ~= nil) then config[published.KEY] = published_fields(parsed, raw, where, blockers) end
+  if is_packed(parsed, config.scripts ~= nil) then
+    config[published.KEY] = published_fields(parsed, raw, where, blockers)
+  else
+    carry_identity(config, raw, where, blockers)
+  end
   local commands = {}
   for _, step_or_steps in pairs(config.scripts or {}) do
     for _, step in ipairs(steps_in(step_or_steps)) do
