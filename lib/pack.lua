@@ -87,12 +87,23 @@ async function withoutDerived(tarball, stageDirectory) {
   return tarball;
 }
 
+/** @implNote a junction only where Windows refuses a symlink: a relative symlink reached through a
+ *  junction resolves against the junction's location, and pnpm 12 writes relative ones. */
+function linkDirectory(target, link) {
+  try {
+    symlinkSync(target, link, "dir");
+  } catch (error) {
+    if (error.code !== "EPERM") throw error;
+    symlinkSync(target, link, "junction");
+  }
+}
+
 /** Runs pnpm's pack with `node_modules` in place, where pnpm alone looks for a workspace sibling's
  *  version: the proof installs elsewhere so that it writes nothing into the author's tree. */
 function runPnpmPack(pnpmEntry, modules, directory, destination) {
   const link = join(directory, "node_modules");
   const linked = !existsSync(link);
-  if (linked) symlinkSync(modules, link, "junction");
+  if (linked) linkDirectory(modules, link);
   try {
     return spawnSync(process.execPath, [pnpmEntry, "pack", "--pack-destination", destination],
       { cwd: directory, stdio: ["ignore", "inherit", "inherit"] });

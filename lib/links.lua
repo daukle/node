@@ -20,8 +20,8 @@ local WORKSPACE_MODULES_DIR = "build/daukle/node_modules"
      overwrites, and a hard link goes stale on the first sync that changes it.
      The bytes placed are kept beside the generated file, so a root copy that is
      merely an older generation is told apart from a hand edit. A junction is
-     used on Windows because it needs no privilege, and lstat reports one as a
-     symbolic link whose readlink can carry a "\\?\" prefix. ]]
+     the fallback on Windows because it needs no privilege, and lstat reports one
+     as a symbolic link whose readlink can carry a "\\?\" prefix. ]]
 local TEMPLATE = [==[
 import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, rmSync,
   symlinkSync, writeFileSync } from "node:fs";
@@ -235,6 +235,17 @@ function workspaceModules() {
   return workspace.modules === undefined ? null : resolve(packageRoot, workspace.modules);
 }
 
+/** @implNote a junction only where Windows refuses a symlink, because it resolves a relative symlink reached through a junction against the junction's location, and pnpm 12 writes relative symlinks wherever it is granted them. */
+function linkDirectory(target, link) {
+  if (!windows) return symlinkSync(relative(dirname(link), target), link, "dir");
+  try {
+    symlinkSync(target, link, "dir");
+  } catch (error) {
+    if (!LINK_REFUSALS.has(error.code)) throw error;
+    symlinkSync(target, link, "junction");
+  }
+}
+
 /** @implNote pnpm installs a workspace project's modules into that project's own directory, so the derived node_modules is a link to them. */
 function linkDerivedModules(target) {
   mkdirSync(target, { recursive: true });
@@ -246,8 +257,7 @@ function linkDerivedModules(target) {
   } else if (entry !== null) {
     rmSync(derivedModules, { recursive: true, force: true });
   }
-  if (windows) symlinkSync(target, derivedModules, "junction");
-  else symlinkSync(relative(derived, target), derivedModules, "dir");
+  linkDirectory(target, derivedModules);
 }
 
 function copyModules() {
@@ -258,8 +268,7 @@ function copyModules() {
 function linkModules() {
   if (process.env.DAUKLE_NODE_LINK === "copy") return copyModules();
   try {
-    if (windows) symlinkSync(derivedModules, rootModules, "junction");
-    else symlinkSync(relative(packageRoot, derivedModules), rootModules, "dir");
+    linkDirectory(derivedModules, rootModules);
   } catch (error) {
     if (!LINK_REFUSALS.has(error.code)) throw error;
     copyModules();
