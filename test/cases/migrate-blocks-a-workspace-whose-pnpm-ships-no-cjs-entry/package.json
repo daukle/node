@@ -1,8 +1,0 @@
-{
-  "private": true,
-  "packageManager": "pnpm@12.4.2",
-  "dependencies": { "debug": "4.3.4" },
-  "scripts": {
-    "start": "node src/main.js"
-  }
-}

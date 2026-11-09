@@ -1,1 +1,0 @@
-{"name":"b","version":"1.0.0","private":true,"dependencies":{"a":"workspace:*","semver":"7.6.3"},"scripts":{"check":"node index.js"}}
