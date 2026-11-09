@@ -184,8 +184,9 @@ junction as one) whose target is this instance's `build/daukle/<instance>/node_m
 after `daukle clean`, is replaced. With the file and different bytes it is refused, which is how an
 older generation after a manifest change is told from a hand edit.
 
-**`node_modules` is a junction on Windows (it needs no privilege) and a `"dir"` symlink elsewhere,**
-and it is always created, even when nothing is declared. It degrades to a marked copy on `EPERM`, `ENOTSUP`, `EOPNOTSUPP` or `EINVAL`. The environment
+**`node_modules` is a `"dir"` symlink, or on a Windows host that refuses one a junction, which needs no
+privilege,** because Windows resolves a relative symlink reached through a junction against the junction's
+location and pnpm 12 writes relative symlinks wherever it is granted them. It is always created, even when nothing is declared. It degrades to a marked copy on `EPERM`, `ENOTSUP`, `EOPNOTSUPP` or `EINVAL`. The environment
 variable `DAUKLE_NODE_LINK=copy` forces that, and is the only way to make a link fail on a CI runner.
 
 **It refuses, never replaces, what it did not place.** A real root `node_modules` or `package.json`,
