@@ -112,11 +112,17 @@ local function flow_globs(text)
 end
 
 --- Reads one unindented line into `workspace`, returning false when it is not a shape this reads.
+--- Whether a zero-indent `key:` is a setting, rather than a flow mapping or a value with a colon.
+local function is_setting(key, rest)
+  return string.match(key, "^%a[%w_%-]*$") ~= nil and (rest == "" or string.match(rest, "^%s") ~= nil)
+end
+
 local function read_top_level(workspace, state, line)
   local key, rest = key_of(line)
   if key == nil then return false end
   state.catalog_name = nil
   if key == "packages" then
+    workspace.declares_packages = true
     state.section = "packages"
     if is_heading(rest) then return true end
     local globs = flow_globs(string.match(rest, "^%s*(.-)$"))
@@ -128,7 +134,9 @@ local function read_top_level(workspace, state, line)
     state.section = key
     workspace[key] = workspace[key] or {}
   else
+    if not is_setting(key, rest) then return false end
     workspace.unknown[#workspace.unknown + 1] = key
+    workspace.carried[#workspace.carried + 1] = line
     state.section = "unknown"
   end
   return true
@@ -152,7 +160,10 @@ end
 --- Reads one indented line into the section it belongs to, returning false when it is not one.
 local function read_nested(workspace, state, line)
   local section = state.section
-  if section == "unknown" then return true end
+  if section == "unknown" then
+    workspace.carried[#workspace.carried + 1] = line
+    return true
+  end
   if section == "packages" then return read_package_glob(workspace, line) end
   local indent = #string.match(line, "^( *)")
   local body = string.sub(line, indent + 1)
@@ -177,7 +188,10 @@ end
 local function read_line(workspace, state, line)
   if string.match(line, "^[ ]*\t") then return false end
   if is_blank(line) then return true end
-  if string.match(line, "^%-%s") and state.section == "unknown" then return true end
+  if string.match(line, "^%-%s") and state.section == "unknown" then
+    workspace.carried[#workspace.carried + 1] = line
+    return true
+  end
   if string.match(line, "^%-%s") and state.section == "packages" then return read_package_glob(workspace, line) end
   if string.match(line, "^%s") == nil then return read_top_level(workspace, state, line) end
   return state.section ~= nil and read_nested(workspace, state, line)
@@ -186,7 +200,7 @@ end
 --- The workspace a file declares, or nil and why when a line is outside the shapes it reads.
 function pnpm_workspace.parse(text)
   if string.sub(text, 1, 3) == BOM then text = string.sub(text, 4) end
-  local workspace = { packages = {}, excluded = {}, unknown = {} }
+  local workspace = { packages = {}, excluded = {}, unknown = {}, carried = {} }
   local state, number = {}, 0
   for raw in string.gmatch(text .. "\n", "([^\n]*)\n") do
     number = number + 1
@@ -248,6 +262,50 @@ function pnpm_workspace.members(workspace, directories)
   return members
 end
 
+--- The settings a rendered workspace file cannot carry: those naming a file the workspace the tree
+--- task rebuilds does not hold, and those moving what this toolchain places itself.
+pnpm_workspace.UNCARRIED = {
+  patchedDependencies = true, pnpmfile = true, globalPnpmfile = true, onlyBuiltDependenciesFile = true,
+  configDependencies = true,
+  nodeLinker = true, lockfile = true, sharedWorkspaceLockfile = true, enableGlobalVirtualStore = true,
+  modulesDir = true, virtualStoreDir = true, enableModulesDir = true,
+}
+
+--- The problem with a block's `settings` text, or nil: it may hold only what `parse` carries, since
+--- `render` writes it beside the members and catalogs and pnpm refuses a key written twice.
+function pnpm_workspace.settings_problem(text)
+  local workspace, problem = pnpm_workspace.parse(text)
+  if workspace == nil then return problem end
+  if workspace.declares_packages or workspace.catalog ~= nil or workspace.catalogs ~= nil then
+    return 'holds "packages", "catalog" or "catalogs", which have keys of their own'
+  end
+  return nil
+end
+
+local RANGE_PREFIXES = { "workspace:", "catalog:", "file:" }
+
+--- Whether `range` is one only pnpm resolves, inside a workspace.
+function pnpm_workspace.is_workspace_range(range)
+  local lowered = string.lower(range)
+  for _, prefix in ipairs(RANGE_PREFIXES) do
+    if string.sub(lowered, 1, #prefix) == prefix then return true end
+  end
+  return false
+end
+
+local function catalog_named(workspace, name)
+  if (name == "" or name == "default") and workspace.catalog ~= nil then return workspace.catalog end
+  return (workspace.catalogs or {})[name == "" and "default" or name]
+end
+
+--- The range a `catalog:` specifier takes for `package_name`, or nil when `range` is no such
+--- specifier or its catalog does not list the package.
+function pnpm_workspace.catalog_range(workspace, package_name, range)
+  local name = string.lower(string.sub(range, 1, 8)) == "catalog:" and string.sub(range, 9) or nil
+  local catalog = name and catalog_named(workspace, name)
+  return catalog and catalog[package_name] or nil
+end
+
 local function quoted_scalar(text)
   return "'" .. string.gsub(text, "'", "''") .. "'"
 end
@@ -265,8 +323,9 @@ local function render_catalog(lines, catalog, indent)
   end
 end
 
---- The `pnpm-workspace.yaml` a `{ members, catalog, catalogs }` renders to: each member, a
---- `{ dir }`, by its directory, then the catalogs, in the shapes `parse` reads back.
+--- The `pnpm-workspace.yaml` a `{ members, catalog, catalogs, settings }` renders to: each member,
+--- a `{ dir }`, by its directory, then the catalogs, in the shapes `parse` reads back, then the
+--- settings as the original file wrote them, because only pnpm reads those.
 function pnpm_workspace.render(workspace)
   local lines = { #workspace.members == 0 and "packages: []" or "packages:" }
   for _, member in ipairs(workspace.members) do lines[#lines + 1] = "  - " .. quoted_scalar(member.dir) end
@@ -281,6 +340,7 @@ function pnpm_workspace.render(workspace)
       render_catalog(lines, workspace.catalogs[name], "    ")
     end
   end
+  if workspace.settings ~= nil then lines[#lines + 1] = workspace.settings end
   return table.concat(lines, "\n") .. "\n"
 end
 

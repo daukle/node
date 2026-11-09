@@ -1,0 +1,5 @@
+workspace = true
+a = "workspace:*"
+c_d = "file:packages/c_d"
+ms = "catalog:"
+semver = "catalog:tools_x"
