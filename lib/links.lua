@@ -182,13 +182,27 @@ const workspaceFiles = workspace.files ?? {};
 const placedFilesRecord = join(derived, PLACED_FILES_NAME);
 const placedFiles = jsonAt(placedFilesRecord);
 
+const DOCUMENT_START = "---\n";
+
+/** @implNote below a leading `---`, because pnpm 12 reads a comment above it as a document of its
+ *  own and refuses the lockfile as broken. */
+function withTextMarker(text) {
+  if (!text.startsWith(DOCUMENT_START)) return TEXT_MARKER + "\n" + text;
+  return DOCUMENT_START + TEXT_MARKER + "\n" + text.slice(DOCUMENT_START.length);
+}
+
+function carriesTextMarker(text) {
+  const [first, second] = text.split(/\r?\n/, 2);
+  return first === TEXT_MARKER || (first === "---" && second === TEXT_MARKER);
+}
+
 function fileActions() {
   return Object.entries(workspaceFiles).map(([name, source]) => {
     const target = join(packageRoot, name);
     const entry = entryAt(target);
     if (entry !== null) {
       const present = entry.isFile() ? readFileSync(target, "utf8") : null;
-      if (present === null || present.split(/\r?\n/, 1)[0] !== TEXT_MARKER) {
+      if (present === null || !carriesTextMarker(present)) {
         throw new Refusal(`"${shown(target)}" is not one daukle placed: daukle generates it from`
           + " daukle.toml, so remove it (daukle migrate moves it aside)");
       }
@@ -197,7 +211,7 @@ function fileActions() {
           + " change into daukle.toml");
       }
     }
-    return { name, target, text: TEXT_MARKER + "\n" + readFileSync(join(derived, source), "utf8") };
+    return { name, target, text: withTextMarker(readFileSync(join(derived, source), "utf8")) };
   });
 }
 
