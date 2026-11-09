@@ -255,12 +255,29 @@ local function npm_install_for_probe(context, root, pick, config, env)
   return failure.message
 end
 
+local function relative_to(dir, path)
+  if dir == nil then return path end
+  if path == dir then return "" end
+  return string.sub(path, #dir + 2)
+end
+
+--- The commands its workspace root's modules provide, for a member's script: pnpm puts the root's
+--- `.bin` on a member script's PATH after the member's own (measured on 8.9.2, 10.34.9 and 11.25.0).
+local function root_bins_of(context, node, script, workspace_root)
+  if not is_workspace_installed(workspace_root) then return nil end
+  local modules = paths.climb_from(relative_to(workspace_root.dir, context.dir)) .. WORKSPACE_MODULES_DIR
+  local answer = daukle.exec(node, { script, paths.climb_from(context.dir), modules },
+                             { cwd = context.dir or ".", capture = true })
+  return daukle.json_parse(answer.stdout).bins
+end
+
 --- The probe's facts: each command the package's modules provide, and the ignore facts. A
 --- workspace member installs nothing of its own and reads the modules its root's install placed.
 ---
 --- @implNote the probe script still runs after a failed install, because the ignore facts need no
 --- node_modules and the report should carry them beside the install failure.
-local function probe(context, config, env, is_member)
+local function probe(context, config, env, workspace_root)
+  local is_member = workspace_root ~= nil
   local root, pick = provision(context, config.version)
   local unresolved = nil
   if not is_member then unresolved = npm_install_for_probe(context, root, pick, config, env) end
@@ -269,7 +286,9 @@ local function probe(context, config, env, is_member)
                  paths.climb_from(context.dir) }
   if is_member then argv[3] = WORKSPACE_MODULES_DIR end
   local answer = daukle.exec(root:tool(pick.node), argv, { cwd = context.dir or ".", capture = true })
-  return daukle.json_parse(answer.stdout), unresolved
+  local facts = daukle.json_parse(answer.stdout)
+  if is_member then facts.root_bins = root_bins_of(context, root:tool(pick.node), argv[1], workspace_root) end
+  return facts, unresolved
 end
 
 local NPM_CONFIGURATION = "configures npm in a way this toolchain does not carry over"
@@ -770,7 +789,7 @@ local function run_package(context, files, translation, workspace, members)
     translation.config.version = version
   end
   local is_member = translation.root ~= nil
-  local facts, unresolved = probe(context, translation.config, npmrc.env(rc.config), is_member)
+  local facts, unresolved = probe(context, translation.config, npmrc.env(rc.config), translation.root)
   local lock_text = (unresolved == nil and not is_member) and lock_of(context, files) or nil
   if files.installs_with_pnpm then lock_text = daukle.read(within(context.dir, PNPM_LOCK)) end
   local blockers
@@ -785,7 +804,7 @@ local function run_package(context, files, translation, workspace, members)
                          .. " which package provides each command cannot be resolved",
                    surface = "NPM-SURFACE.md: " .. package_fields.ROWS.workspaces } }
   else
-    blockers = translate.resolve_commands(translation.config, facts.bins, where)
+    blockers = translate.resolve_commands(translation.config, facts.bins, where, facts.root_bins)
     if #blockers == 0 then
       blockers = unpublishable_scripts(translation.config, translation.original_scripts, where)
     end
@@ -882,12 +901,6 @@ end
 
 local function parent_of(dir)
   return string.match(dir, "^(.+)/[^/]+$")
-end
-
-local function relative_to(dir, path)
-  if dir == nil then return path end
-  if path == dir then return "" end
-  return string.sub(path, #dir + 2)
 end
 
 local function installs_with_pnpm_in(dir, exists)
