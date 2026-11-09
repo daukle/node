@@ -38,10 +38,16 @@ package_fields.METADATA = { name = true, version = true, description = true, lic
                             contributors = true, keywords = true, repository = true, homepage = true,
                             bugs = true, private = true, funding = true }
 
+--- The metadata a running program can read back from a package's own `package.json`, carried for
+--- a package that is not packed and rendered from the `package` table for one that is.
+package_fields.IDENTITY = { "name", "version" }
+
+local IS_IDENTITY = { name = true, version = true }
+
 --- Whether a field is one daukle/node handles itself, so it is never carried.
 function package_fields.is_owned(name, written)
-  return package_fields.ABSENT[name] ~= nil or package_fields.READ[name] or package_fields.METADATA[name]
-         or written[name] == true
+  return package_fields.ABSENT[name] ~= nil or package_fields.READ[name]
+         or (package_fields.METADATA[name] and not IS_IDENTITY[name]) or written[name] == true
 end
 
 local function skip_blank(text, index)

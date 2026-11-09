@@ -283,7 +283,7 @@ one of its rows.
   translates again. When no pinned npm accepts the lockfile it is a blocker carrying npm's reason.
 - **A package that declares `"files"`, `"exports"` or `"publishConfig"`, or a non-private one with
   a `main` beside scripts, is PACKED** (`D-238`, spec `2026-11-06-npm-packing-design.md`). Its
-  `name`, `version`, metadata, `main`, `exports`, `files` and `publishConfig` go into the `package`
+  `name`, `version`, metadata, `main`, `exports`, `files`, `publishConfig` and `packageManager` go into the `package`
   key as raw JSON text, and its proof is `node:migration-proof`, which runs `node:tree` and `node:pack` and also compares the tarball
   itself, kept as `package.tgz` on both sides, with core's `as = "archive-json"` (api 9): every
   member by its bytes and `package.json` by its parsed value, because the packed manifest is
@@ -297,6 +297,9 @@ one of its rows.
   `daukle.run_task` (core `0.24.0`). The task name follows core's instance naming, `node-<dir>`
   with every `/` a `-`, and the migrator blocks the step unless `sub` is a nested package it
   hands back that declares the script.
+- **Every package keeps its `name` and `version` in the generated `package.json`** (`D-265`), so a
+  program reading its own or a sibling's manifest sees what the original held: from the `package`
+  table when it is packed, carried in `packageFields` when it is not.
 - **A package that `exports` resolves its own name as node does** (`D-252`): node self-references
   only through the `exports` of the nearest `package.json`, so the generated one, and the copy
   `node:install` places at the root, carries the packed `name` and `exports`, and the resolver hook

@@ -1,0 +1,6 @@
+{
+  "name": "inner",
+  "version": "2.7.16",
+  "private": true,
+  "devDependencies": { "outer": "file:../.." }
+}

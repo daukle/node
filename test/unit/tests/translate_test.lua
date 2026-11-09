@@ -71,8 +71,8 @@ end
 
 return {
   translates('{}', { version = "26.3.1" }),
-  translates('\239\187\191{"name":"x"}', { version = "26.3.1" }),
-  translates('{\r\n  "private": true,\r\n  "version": "1.0.0"\r\n}\r\n', { version = "26.3.1" }),
+  translates('\239\187\191{"name":"x"}', { version = "26.3.1", packageFields = { name = '"x"' } }),
+  translates('{\r\n  "private": true,\r\n  "version": "1.0.0"\r\n}\r\n', { version = "26.3.1", packageFields = { version = '"1.0.0"' } }),
   translates('{"dependencies":{"semver":"^7.6.0"},"devDependencies":{"@types/node":"22.0.0"}}',
              { version = "26.3.1", packages = { semver = "^7.6.0" },
                devPackages = { ["@types/node"] = "22.0.0" } }),

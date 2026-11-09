@@ -12,7 +12,7 @@ published.KEY = "package"
 published.FIELDS = { name = true, version = true, description = true, license = true, author = true,
                      contributors = true, keywords = true, repository = true, homepage = true,
                      bugs = true, private = true, funding = true, main = true, exports = true, files = true,
-                     publishConfig = true }
+                     publishConfig = true, packageManager = true }
 
 --- A key of the table that is no field of the manifest, each script's text where it spaces its
 --- words differently from what its steps render.
