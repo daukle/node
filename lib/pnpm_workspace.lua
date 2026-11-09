@@ -248,6 +248,30 @@ function pnpm_workspace.members(workspace, directories)
   return members
 end
 
+local RANGE_PREFIXES = { "workspace:", "catalog:", "file:" }
+
+--- Whether `range` is one only pnpm resolves, inside a workspace.
+function pnpm_workspace.is_workspace_range(range)
+  local lowered = string.lower(range)
+  for _, prefix in ipairs(RANGE_PREFIXES) do
+    if string.sub(lowered, 1, #prefix) == prefix then return true end
+  end
+  return false
+end
+
+local function catalog_named(workspace, name)
+  if (name == "" or name == "default") and workspace.catalog ~= nil then return workspace.catalog end
+  return (workspace.catalogs or {})[name == "" and "default" or name]
+end
+
+--- The range a `catalog:` specifier takes for `package_name`, or nil when `range` is no such
+--- specifier or its catalog does not list the package.
+function pnpm_workspace.catalog_range(workspace, package_name, range)
+  local name = string.match(string.lower(range), "^catalog:(.*)$")
+  local catalog = name and catalog_named(workspace, name)
+  return catalog and catalog[package_name] or nil
+end
+
 local function quoted_scalar(text)
   return "'" .. string.gsub(text, "'", "''") .. "'"
 end

@@ -190,7 +190,8 @@ local function dependencies_of(config, lock_text)
   if pnpm ~= nil then
     return { { kind = "dependencies", id = "pnpm",
                config = { version = config.version, pnpm = pnpm, packages = packages or {},
-                          devPackages = dev_packages or {}, lock = lock_text, overrides = overrides } } }
+                          devPackages = dev_packages or {}, lock = lock_text, overrides = overrides,
+                          workspace = is_workspace_root or nil } } }
   end
   return { { kind = "dependencies", id = "npm",
              config = { version = config.version, packages = packages or {},
@@ -223,10 +224,26 @@ local function is_workspace_installed(root)
   return daukle.list(within(root.dir, WORKSPACE_MODULES_DIR)) ~= nil
 end
 
+--- The ranges npm can install for a workspace root's probe: a `catalog:` range as its catalog
+--- gives it, and neither a `workspace:` nor a `file:` one, which only pnpm resolves.
+local function ranges_npm_installs(ranges, workspace)
+  if ranges == nil or type(workspace) ~= "table" then return ranges end
+  local installable = {}
+  for name, range in pairs(ranges) do
+    if pnpm_workspace.is_workspace_range(range) then
+      installable[name] = pnpm_workspace.catalog_range(workspace, name, range)
+    else
+      installable[name] = range
+    end
+  end
+  return installable
+end
+
 local function npm_install_for_probe(context, root, pick, config, env)
+  local workspace = config[pnpm_workspace.KEY]
   daukle.write{ path = "migrate-probe/package.json", text = '{' .. PROBE_IDENTITY
-                .. ', "private": true, "dependencies": ' .. json_object(config.packages)
-                .. ', "devDependencies": ' .. json_object(config.devPackages)
+                .. ', "private": true, "dependencies": ' .. json_object(ranges_npm_installs(config.packages, workspace))
+                .. ', "devDependencies": ' .. json_object(ranges_npm_installs(config.devPackages, workspace))
                 .. (config.overrides == nil and "" or (', "overrides": ' .. config.overrides)) .. '}\n' }
   local install = daukle.exec(root:tool(pick.node), { root:path(pick.npm), "install",
                                                       "--ignore-scripts", "--include=dev" },
@@ -1048,14 +1065,16 @@ local function member_names_of(context, members)
   return directories
 end
 
---- The translation of a package, a pnpm workspace member's when `root` is its workspace root.
-local function translation_of(context, root, workspace_members)
+--- The translation of a package: a pnpm workspace member's when `root` is its workspace root, a
+--- workspace root's own when `own_workspace` is the workspace it declares.
+local function translation_of(context, root, own_workspace, workspace_members)
   local where = within(context.dir, "package.json")
-  local member = nil
-  if root ~= nil then
-    member = { keeps_file_range = function(range) return is_inside_workspace(context, root, range) end }
+  local holder = root or (own_workspace ~= nil and { dir = context.dir, workspace = own_workspace }) or nil
+  local in_workspace = nil
+  if holder ~= nil then
+    in_workspace = { keeps_file_range = function(range) return is_inside_workspace(context, holder, range) end }
   end
-  local translation = translate.package(daukle.read(where), where, member, workspace_members)
+  local translation = translate.package(daukle.read(where), where, in_workspace, workspace_members)
   if root ~= nil then
     translation.root = root
     translation.config[pnpm_workspace.KEY] = root.instance
@@ -1089,7 +1108,7 @@ local function run(context)
   local root = workspace_root_of(context)
   local translation = translation_of(context, root)
   local workspace, members, member_refusals = workspace_and_members(context, files, translation)
-  if workspace ~= nil then translation = translation_of(context, root, member_names_of(context, members)) end
+  if workspace ~= nil then translation = translation_of(context, root, workspace, member_names_of(context, members)) end
   local instances = take_instances(context, files, members)
   if member_refusals ~= nil then
     for _, refused in ipairs(unplaceable_member_blockers(context, files, members)) do

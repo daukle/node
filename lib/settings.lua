@@ -121,7 +121,7 @@ local function checked_range(name, range, key, in_workspace)
                           .. ' carries no "%s"', key, name, range, pnpm_workspace.KEY), 0)
     end
   end
-  if string.match(range, '^[%w%s%.%-%+%*|<>=~^%(%)/:#@]+$') == nil then
+  if string.match(range, '^[%w%s%.%-_%+%*|<>=~^%(%)/:#@]+$') == nil then
     error(string.format('%s."%s" is not a version range this toolchain writes: "%s" holds a'
                         .. ' character that would have to be escaped into the generated'
                         .. ' package.json', key, name, range), 0)

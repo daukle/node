@@ -1,0 +1,7 @@
+packages:
+  - 'packages/*'
+catalog:
+  ms: 2.1.3
+catalogs:
+  tools_x:
+    semver: 7.6.3
