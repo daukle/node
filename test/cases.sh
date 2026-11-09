@@ -81,10 +81,10 @@ server.serve_forever()
 # packs it and served from 127.0.0.1.
 # daukle/npm translates a migrated project's dependencies into pins, so the
 # catalog names its release beside the staged node plugin.
-NPM_PLUGIN_URL=https://github.com/daukle/npm/releases/download/2.4.0/plugin.lua
-NPM_PLUGIN_SHA256=9f3e2967cda6364b5fa27b45bd4cdbe5dc4255a8a19904eeb39d4da53562310f
-PNPM_PLUGIN_URL=https://github.com/daukle/pnpm/releases/download/1.3.0/plugin.lua
-PNPM_PLUGIN_SHA256=9077e690ed25f28cd73f2e81e2b70d92e35e8f1b755325f58d41351c891097c5
+NPM_PLUGIN_URL=https://github.com/daukle/npm/releases/download/2.4.1/plugin.lua
+NPM_PLUGIN_SHA256=42569b511744343adb7af083ddc58162085f662719491599d68aa278bf947225
+PNPM_PLUGIN_URL=https://github.com/daukle/pnpm/releases/download/1.3.1/plugin.lua
+PNPM_PLUGIN_SHA256=09f14bab4bc04734439d1cc36df4b87da95d4e49aefeea00d399c008208903e4
 
 serve_plugin() {
   [ -n "${catalog:-}" ] && return 0
