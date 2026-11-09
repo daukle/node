@@ -104,6 +104,7 @@ async function stage(root, manifestPath, stageDirectory, destination) {
   tree.package = JSON.parse(manifestText);
   const files = await packlist(tree, { path: root });
   rmSync(stageDirectory, { recursive: true, force: true });
+  mkdirSync(stageDirectory, { recursive: true });
   for (const file of files) {
     if (file === "package.json" || DAUKLE_ROOT_ENTRIES.has(file.split("/")[0])) continue;
     mkdirSync(dirname(join(stageDirectory, file)), { recursive: true });
