@@ -129,6 +129,7 @@ local function read_top_level(workspace, state, line)
     workspace[key] = workspace[key] or {}
   else
     workspace.unknown[#workspace.unknown + 1] = key
+    workspace.carried[#workspace.carried + 1] = line
     state.section = "unknown"
   end
   return true
@@ -152,7 +153,10 @@ end
 --- Reads one indented line into the section it belongs to, returning false when it is not one.
 local function read_nested(workspace, state, line)
   local section = state.section
-  if section == "unknown" then return true end
+  if section == "unknown" then
+    workspace.carried[#workspace.carried + 1] = line
+    return true
+  end
   if section == "packages" then return read_package_glob(workspace, line) end
   local indent = #string.match(line, "^( *)")
   local body = string.sub(line, indent + 1)
@@ -177,7 +181,10 @@ end
 local function read_line(workspace, state, line)
   if string.match(line, "^[ ]*\t") then return false end
   if is_blank(line) then return true end
-  if string.match(line, "^%-%s") and state.section == "unknown" then return true end
+  if string.match(line, "^%-%s") and state.section == "unknown" then
+    workspace.carried[#workspace.carried + 1] = line
+    return true
+  end
   if string.match(line, "^%-%s") and state.section == "packages" then return read_package_glob(workspace, line) end
   if string.match(line, "^%s") == nil then return read_top_level(workspace, state, line) end
   return state.section ~= nil and read_nested(workspace, state, line)
@@ -186,7 +193,7 @@ end
 --- The workspace a file declares, or nil and why when a line is outside the shapes it reads.
 function pnpm_workspace.parse(text)
   if string.sub(text, 1, 3) == BOM then text = string.sub(text, 4) end
-  local workspace = { packages = {}, excluded = {}, unknown = {} }
+  local workspace = { packages = {}, excluded = {}, unknown = {}, carried = {} }
   local state, number = {}, 0
   for raw in string.gmatch(text .. "\n", "([^\n]*)\n") do
     number = number + 1
@@ -248,6 +255,22 @@ function pnpm_workspace.members(workspace, directories)
   return members
 end
 
+--- The settings a rendered workspace file cannot carry: patch files are not in the workspace the
+--- tree task rebuilds, and the others move what this toolchain places itself.
+pnpm_workspace.UNCARRIED = { patchedDependencies = true, nodeLinker = true, lockfile = true,
+                             sharedWorkspaceLockfile = true, enableGlobalVirtualStore = true }
+
+--- The problem with a block's `settings` text, or nil: it may hold only what `parse` carries, since
+--- `render` writes it beside the members and catalogs and pnpm refuses a key written twice.
+function pnpm_workspace.settings_problem(text)
+  local workspace, problem = pnpm_workspace.parse(text)
+  if workspace == nil then return problem end
+  if #workspace.packages > 0 or workspace.catalog ~= nil or workspace.catalogs ~= nil then
+    return 'holds "packages", "catalog" or "catalogs", which have keys of their own'
+  end
+  return nil
+end
+
 local RANGE_PREFIXES = { "workspace:", "catalog:", "file:" }
 
 --- Whether `range` is one only pnpm resolves, inside a workspace.
@@ -289,8 +312,9 @@ local function render_catalog(lines, catalog, indent)
   end
 end
 
---- The `pnpm-workspace.yaml` a `{ members, catalog, catalogs }` renders to: each member, a
---- `{ dir }`, by its directory, then the catalogs, in the shapes `parse` reads back.
+--- The `pnpm-workspace.yaml` a `{ members, catalog, catalogs, settings }` renders to: each member,
+--- a `{ dir }`, by its directory, then the catalogs, in the shapes `parse` reads back, then the
+--- settings as the original file wrote them, because only pnpm reads those.
 function pnpm_workspace.render(workspace)
   local lines = { #workspace.members == 0 and "packages: []" or "packages:" }
   for _, member in ipairs(workspace.members) do lines[#lines + 1] = "  - " .. quoted_scalar(member.dir) end
@@ -305,6 +329,7 @@ function pnpm_workspace.render(workspace)
       render_catalog(lines, workspace.catalogs[name], "    ")
     end
   end
+  if workspace.settings ~= nil then lines[#lines + 1] = workspace.settings end
   return table.concat(lines, "\n") .. "\n"
 end
 

@@ -1,0 +1,1 @@
+{"private":true,"packageManager":"pnpm@10.34.9","dependencies":{"a":"workspace:*","debug":"4.3.4"},"scripts":{"start":"node src/main.js"}}

@@ -249,7 +249,7 @@ local function published_of(config)
   return value
 end
 
-local WORKSPACE_KEYS = { members = true, catalog = true, catalogs = true }
+local WORKSPACE_KEYS = { members = true, catalog = true, catalogs = true, settings = true }
 
 local function is_instance_name(name)
   return string.match(name, "^[%w][%w%.%_%-]*$") ~= nil
@@ -272,6 +272,14 @@ end
 
 --- A workspace root's `workspace`: its members, each `{ dir, instance }` sorted by the directory
 --- below the root, and its catalogs.
+local function checked_workspace_settings(text)
+  if text == nil then return nil end
+  if type(text) ~= "string" then error(workspace_problem('"settings" must be workspace file text'), 0) end
+  local problem = pnpm_workspace.settings_problem(text)
+  if problem ~= nil then error(workspace_problem('"settings" ' .. problem), 0) end
+  return text
+end
+
 local function workspace_of(config)
   local value = config[pnpm_workspace.KEY]
   if value == nil or type(value) == "string" then return nil end
@@ -279,7 +287,7 @@ local function workspace_of(config)
     error(workspace_problem("is a member's root instance as a string, or a root's members and catalogs as a table"), 0)
   end
   for key in pairs(value) do
-    if not WORKSPACE_KEYS[key] then error(workspace_problem('holds "' .. tostring(key) .. '", which is not "members", "catalog" or "catalogs"'), 0) end
+    if not WORKSPACE_KEYS[key] then error(workspace_problem('holds "' .. tostring(key) .. '", which is not "members", "catalog", "catalogs" or "settings"'), 0) end
   end
   if type(value.members) ~= "table" then
     error(workspace_problem('needs "members", each member\'s directory mapped to its instance'), 0)
@@ -302,7 +310,7 @@ local function workspace_of(config)
     for name, catalog in pairs(value.catalogs) do catalogs[name] = checked_catalog(catalog, 'catalogs."' .. tostring(name) .. '"') end
   end
   return { members = members, catalog = value.catalog ~= nil and checked_catalog(value.catalog, "catalog") or nil,
-           catalogs = catalogs }
+           catalogs = catalogs, settings = checked_workspace_settings(value.settings) }
 end
 
 --- A member's `workspace`, the instance of the workspace root it installs through.

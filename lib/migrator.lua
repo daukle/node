@@ -671,8 +671,10 @@ local function pnpm_workspace_of(context, files, config)
   end
   workspace.blockers = {}
   for _, key in ipairs(workspace.unknown) do
-    workspace.blockers[#workspace.blockers + 1] = { construct = key, where = where, surface = surface,
-                                                    why = "is a workspace setting this toolchain does not carry over" }
+    if pnpm_workspace.UNCARRIED[key] then
+      workspace.blockers[#workspace.blockers + 1] = { construct = key, where = where, surface = surface,
+                                                      why = "is a workspace setting this toolchain does not carry over" }
+    end
   end
   for _, pattern in ipairs(pnpm_workspace.brace_globs(workspace)) do
     workspace.blockers[#workspace.blockers + 1] = { construct = pattern, where = where, surface = surface,
@@ -727,8 +729,10 @@ local function adopt_workspace(context, translation, workspace, members)
   for _, refused in ipairs(workspace.blockers) do translation.blockers[#translation.blockers + 1] = refused end
   local instances = {}
   for _, member in ipairs(members) do instances[member] = instance_of(within(context.dir, member)) end
-  translation.config[pnpm_workspace.KEY] = { members = instances, catalog = workspace.catalog,
-                                             catalogs = workspace.catalogs }
+  translation.config[pnpm_workspace.KEY] = {
+    members = instances, catalog = workspace.catalog, catalogs = workspace.catalogs,
+    settings = #(workspace.carried or {}) > 0 and table.concat(workspace.carried, "\n") or nil,
+  }
 end
 
 local function run_package(context, files, translation, workspace, members)

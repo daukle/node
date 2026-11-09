@@ -55,6 +55,8 @@ return {
   reads("reads named catalogs", "catalogs:\n  react17:\n    react: ^17.0.2\n  react18:\n    react: ^18.2.0\n",
         "catalogs", { react17 = { react = "^17.0.2" }, react18 = { react = "^18.2.0" } }),
   reads("lists shadcn's allowBuilds as unknown", SHADCN, "unknown", { "allowBuilds" }),
+  reads("carries an unknown key and its nested and zero-indent lines", "hoistPattern:\n- a\nallowBuilds:\n  b: true\n",
+        "carried", { "hoistPattern:", "- a", "allowBuilds:", "  b: true" }),
   reads("reads shadcn's packages past its unknown key", SHADCN, "packages", { "apps/*", "packages/*" }),
   reads("reads a block list at zero indent", "packages:\n- 'packages/*'\n- apps/*\n", "packages",
         { "packages/*", "apps/*" }),
