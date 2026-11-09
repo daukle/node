@@ -15,6 +15,18 @@ local function raises(name, text, needle)
   end }
 end
 
+local function patch_files(name, text, wanted)
+  return { name = name, check = function() return expect.equal(pnpm_workspace.patch_files(text), wanted) end }
+end
+
+local function refuses_patches(name, text, needle)
+  return { name = name, check = function()
+    local files, problem = pnpm_workspace.patch_files(text)
+    if files ~= nil then return "wanted a problem" end
+    return expect.contains(problem, needle)
+  end }
+end
+
 local function members(name, packages, excluded, directories, wanted)
   return { name = name, check = function()
     return expect.equal(pnpm_workspace.members({ packages = packages, excluded = excluded }, directories), wanted)
@@ -126,6 +138,20 @@ return {
   end },
   { name = "settings may not declare an empty packages list", check = function()
     return expect.contains(pnpm_workspace.settings_problem("packages: []\n"), "keys of their own")
+  end },
+  patch_files("lists each patch file of the block",
+              "hoist: true\npatchedDependencies:\n  bull@4.16.4: patches/bull.patch\n"
+              .. "  '@types/ws@8.18.1': './patches/@types__ws.patch'\nautoInstallPeers: false\n",
+              { "patches/bull.patch", "patches/@types__ws.patch" }),
+  patch_files("lists nothing without the block", "hoist: true\n", {}),
+  refuses_patches("refuses a patch file above the workspace", "patchedDependencies:\n  a@1: ../a.patch\n",
+                  "not below the workspace root"),
+  refuses_patches("refuses an absolute patch file", "patchedDependencies:\n  a@1: /a.patch\n",
+                  "not below the workspace root"),
+  refuses_patches("refuses a block that is a flow mapping", "patchedDependencies: { a@1: a.patch }\n", "is not a block"),
+  refuses_patches("refuses an entry that names no file", "patchedDependencies:\n  a@1:\n", "is not a package mapped"),
+  { name = "settings may not name a patch file above the workspace", check = function()
+    return expect.contains(pnpm_workspace.settings_problem("patchedDependencies:\n  a@1: ../a.patch\n"), "not below")
   end },
   reads_back("packages", { "packages/a", "packages/it's" }),
   reads_back("catalog", { react = "^18.2.0", ["@types/node"] = "20.0.0" }),

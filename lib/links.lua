@@ -20,8 +20,8 @@ local WORKSPACE_MODULES_DIR = "build/daukle/node_modules"
      overwrites, and a hard link goes stale on the first sync that changes it.
      The bytes placed are kept beside the generated file, so a root copy that is
      merely an older generation is told apart from a hand edit. A junction is
-     used on Windows because it needs no privilege, and lstat reports one as a
-     symbolic link whose readlink can carry a "\\?\" prefix. ]]
+     the fallback on Windows because it needs no privilege, and lstat reports one
+     as a symbolic link whose readlink can carry a "\\?\" prefix. ]]
 local TEMPLATE = [==[
 import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, rmSync,
   symlinkSync, writeFileSync } from "node:fs";
@@ -182,13 +182,27 @@ const workspaceFiles = workspace.files ?? {};
 const placedFilesRecord = join(derived, PLACED_FILES_NAME);
 const placedFiles = jsonAt(placedFilesRecord);
 
+const DOCUMENT_START = "---\n";
+
+/** @implNote below a leading `---`, because pnpm 12 reads a comment above it as a document of its
+ *  own and refuses the lockfile as broken. */
+function withTextMarker(text) {
+  if (!text.startsWith(DOCUMENT_START)) return TEXT_MARKER + "\n" + text;
+  return DOCUMENT_START + TEXT_MARKER + "\n" + text.slice(DOCUMENT_START.length);
+}
+
+function carriesTextMarker(text) {
+  const [first, second] = text.split(/\r?\n/, 2);
+  return first === TEXT_MARKER || (first === "---" && second === TEXT_MARKER);
+}
+
 function fileActions() {
   return Object.entries(workspaceFiles).map(([name, source]) => {
     const target = join(packageRoot, name);
     const entry = entryAt(target);
     if (entry !== null) {
       const present = entry.isFile() ? readFileSync(target, "utf8") : null;
-      if (present === null || present.split(/\r?\n/, 1)[0] !== TEXT_MARKER) {
+      if (present === null || !carriesTextMarker(present)) {
         throw new Refusal(`"${shown(target)}" is not one daukle placed: daukle generates it from`
           + " daukle.toml, so remove it (daukle migrate moves it aside)");
       }
@@ -197,7 +211,7 @@ function fileActions() {
           + " change into daukle.toml");
       }
     }
-    return { name, target, text: TEXT_MARKER + "\n" + readFileSync(join(derived, source), "utf8") };
+    return { name, target, text: withTextMarker(readFileSync(join(derived, source), "utf8")) };
   });
 }
 
@@ -221,6 +235,17 @@ function workspaceModules() {
   return workspace.modules === undefined ? null : resolve(packageRoot, workspace.modules);
 }
 
+/** @implNote a junction only where Windows refuses a symlink, because it resolves a relative symlink reached through a junction against the junction's location, and pnpm 12 writes relative symlinks wherever it is granted them. */
+function linkDirectory(target, link) {
+  if (!windows) return symlinkSync(relative(dirname(link), target), link, "dir");
+  try {
+    symlinkSync(target, link, "dir");
+  } catch (error) {
+    if (!LINK_REFUSALS.has(error.code)) throw error;
+    symlinkSync(target, link, "junction");
+  }
+}
+
 /** @implNote pnpm installs a workspace project's modules into that project's own directory, so the derived node_modules is a link to them. */
 function linkDerivedModules(target) {
   mkdirSync(target, { recursive: true });
@@ -232,8 +257,7 @@ function linkDerivedModules(target) {
   } else if (entry !== null) {
     rmSync(derivedModules, { recursive: true, force: true });
   }
-  if (windows) symlinkSync(target, derivedModules, "junction");
-  else symlinkSync(relative(derived, target), derivedModules, "dir");
+  linkDirectory(target, derivedModules);
 }
 
 function copyModules() {
@@ -244,8 +268,7 @@ function copyModules() {
 function linkModules() {
   if (process.env.DAUKLE_NODE_LINK === "copy") return copyModules();
   try {
-    if (windows) symlinkSync(derivedModules, rootModules, "junction");
-    else symlinkSync(relative(packageRoot, derivedModules), rootModules, "dir");
+    linkDirectory(derivedModules, rootModules);
   } catch (error) {
     if (!LINK_REFUSALS.has(error.code)) throw error;
     copyModules();

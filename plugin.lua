@@ -101,6 +101,20 @@ local function through_launcher(npm_argv)
   return npm_argv
 end
 
+--- The path of what runs the pinned pnpm: its entry script, or from 12 this host's native binary.
+local function provisioned_pnpm(context, pnpm)
+  local as = "pnpm " .. pnpm.version
+  if pnpm.binaries == nil then
+    return daukle.provision{ url = pnpm.url, sha256 = pnpm.sha256, as = as }:path("package/bin/pnpm.cjs")
+  end
+  local binary = pnpm.binaries[context.host.os .. "/" .. context.host.arch]
+  if binary == nil then
+    error(string.format("pnpm %s has no pinned binary for this host (%s %s)", pnpm.version, context.host.os,
+                        context.host.arch), 0)
+  end
+  return daukle.provision{ url = binary.url, sha256 = binary.sha256, as = as }:path(binary.file)
+end
+
 --- The pinned pnpm, with the mirror's map of the tarballs daukle fetched written beside it.
 local function pnpm_behind_mirror(context, lock)
   local fetched = {}
@@ -108,8 +122,7 @@ local function pnpm_behind_mirror(context, lock)
     fetched[#fetched + 1] = { url = entry.url, file = daukle.artifact{ url = entry.url, sha256 = entry.sha256, as = entry.as } }
   end
   daukle.write{ path = pnpm_mirror.MAP_NAME, text = pnpm_mirror.map_json(fetched) }
-  local pnpm_root = daukle.provision{ url = lock.pnpm.url, sha256 = lock.pnpm.sha256, as = "pnpm " .. lock.pnpm.version }
-  return pnpm_root:path("package/bin/pnpm.cjs")
+  return provisioned_pnpm(context, lock.pnpm)
 end
 
 --- Installs a pnpm project's pinned closure with its pinned pnpm, through a loopback mirror of
@@ -326,8 +339,19 @@ daukle.task{
 --- daukle.toml renders.
 local TREE_WORKSPACE = "tree-workspace"
 
+--- The project's patch files copied to their paths in `TREE_WORKSPACE`, where its rendered workspace
+--- file names them and pnpm, resolving them against it, reads them.
+local function place_tree_patch_files(context, spec)
+  local project = package_root(context)
+  for _, file in ipairs(pnpm_workspace.patch_files(spec.workspace.settings or "")) do
+    daukle.write{ path = TREE_WORKSPACE .. "/" .. file,
+                  text = daukle.read(project == "." and file or project .. "/" .. file) }
+  end
+end
+
 --- The workspace rebuilt in `TREE_WORKSPACE` from the rendered root and member package.json files,
---- the rendered workspace file and the pinned lockfile, and installed there through the mirror.
+--- the rendered workspace file, its patch files and the pinned lockfile, and installed there
+--- through the mirror.
 ---
 --- @implNote rebuilt rather than installed in the project's tree, because the proof runs while the
 --- author's own package.json files are still at their paths; and its own workspace file is the
@@ -338,6 +362,7 @@ local function install_tree_workspace(context, spec, root, pick)
   daukle.write{ path = TREE_WORKSPACE .. "/package.json", text = settings.package_json(spec) }
   daukle.write{ path = TREE_WORKSPACE .. "/" .. pnpm_workspace.NAME, text = pnpm_workspace.render(spec.workspace) }
   daukle.write{ path = TREE_WORKSPACE .. "/pnpm-lock.yaml", text = spec.pnpm_lock.text }
+  place_tree_patch_files(context, spec)
   for _, member in ipairs(spec.workspace.members) do
     local generated = daukle.read("build/daukle/" .. member.instance .. "/package.json")
     if generated == nil then

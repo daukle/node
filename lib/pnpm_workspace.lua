@@ -265,11 +265,49 @@ end
 --- The settings a rendered workspace file cannot carry: those naming a file the workspace the tree
 --- task rebuilds does not hold, and those moving what this toolchain places itself.
 pnpm_workspace.UNCARRIED = {
-  patchedDependencies = true, pnpmfile = true, globalPnpmfile = true, onlyBuiltDependenciesFile = true,
-  configDependencies = true,
+  pnpmfile = true, globalPnpmfile = true, onlyBuiltDependenciesFile = true, configDependencies = true,
   nodeLinker = true, lockfile = true, sharedWorkspaceLockfile = true, enableGlobalVirtualStore = true,
   modulesDir = true, virtualStoreDir = true, enableModulesDir = true,
 }
+
+pnpm_workspace.PATCHED_DEPENDENCIES = "patchedDependencies"
+
+local function is_below_the_workspace(path)
+  if string.find(path, "\\", 1, true) or string.match(path, "^/") or string.match(path, "^%a:") then return false end
+  for segment in string.gmatch(path, "[^/]+") do
+    if segment == ".." then return false end
+  end
+  return true
+end
+
+--- The patch file one `patchedDependencies` entry names, or nil and why it cannot be carried.
+local function patch_file_of(line)
+  local body = string.match(line, "^%s+(.*)$")
+  local name, file = entry_of(body)
+  if name == nil then return nil, '"' .. body .. '" is not a package mapped to its patch file' end
+  if not is_below_the_workspace(file) then
+    return nil, 'names the patch file "' .. file .. '", which is not below the workspace root'
+  end
+  return normalized(file)
+end
+
+--- The patch files `patchedDependencies` names in a workspace file's settings text, each relative
+--- to the workspace root, or nil and why they cannot be carried.
+function pnpm_workspace.patch_files(text)
+  local files, inside = {}, false
+  for line in string.gmatch(text .. "\n", "([^\n]*)\n") do
+    if string.match(line, "^%S") then
+      local key, rest = key_of(line)
+      inside = key == pnpm_workspace.PATCHED_DEPENDENCIES
+      if inside and not is_line_end(rest) then return nil, "is not a block of packages mapped to their patch files" end
+    elseif inside and string.match(line, "%S") then
+      local file, problem = patch_file_of(line)
+      if file == nil then return nil, problem end
+      files[#files + 1] = file
+    end
+  end
+  return files
+end
 
 --- The problem with a block's `settings` text, or nil: it may hold only what `parse` carries, since
 --- `render` writes it beside the members and catalogs and pnpm refuses a key written twice.
@@ -279,7 +317,8 @@ function pnpm_workspace.settings_problem(text)
   if workspace.declares_packages or workspace.catalog ~= nil or workspace.catalogs ~= nil then
     return 'holds "packages", "catalog" or "catalogs", which have keys of their own'
   end
-  return nil
+  local _, patch_problem = pnpm_workspace.patch_files(text)
+  return patch_problem
 end
 
 local RANGE_PREFIXES = { "workspace:", "catalog:", "file:" }

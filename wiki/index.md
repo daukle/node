@@ -72,7 +72,7 @@ root, so `node:install` places them there, even when nothing is declared:
 
 | entry | what it is |
 | --- | --- |
-| `node_modules` | a link into `build/daukle/<instance>/node_modules`: a junction on Windows, a directory symlink elsewhere |
+| `node_modules` | a link into `build/daukle/<instance>/node_modules`: a directory symlink, or a junction on a Windows host that refuses one |
 | `package.json` | a COPY of the generated file, never a link. Its first key is `"//"`, a sentence saying daukle generates it, and it carries the toolchain's `type` |
 
 Where a link is refused (`EPERM`, `ENOTSUP`, `EOPNOTSUPP` or `EINVAL`), or `DAUKLE_NODE_LINK=copy` is set,
