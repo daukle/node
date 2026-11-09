@@ -150,14 +150,19 @@ end
 local PUBLISHED_ROW = "7. Packing and publishing: `scripts` in the packed manifest"
 
 --- A blocker for each script a packed package publishes that its steps do not render back to
---- exactly, because the packed manifest is rendered from the steps (ruling 5.2). Called only once
---- every command resolved, since scripts.read refuses a step that still names a bare command.
+--- exactly, because the packed manifest is rendered from the steps (ruling 5.2). A script differing
+--- only in its spacing is no blocker: its text is kept in `scriptText`. Called only once every
+--- command resolved, since scripts.read refuses a step that still names a bare command.
 local function unpublishable_scripts(config, original, where)
   local blockers = {}
   if config[published.KEY] == nil or type(original) ~= "table" then return blockers end
+  local spaced = {}
   for _, script in ipairs(scripts.read({ scripts = config.scripts })) do
     local rendered = published.render(script.steps)
-    if rendered ~= original[script.name] then
+    if rendered ~= original[script.name] and type(original[script.name]) == "string"
+       and published.same_words(rendered, original[script.name]) then
+      spaced[script.name] = original[script.name]
+    elseif rendered ~= original[script.name] then
       blockers[#blockers + 1] = { construct = 'scripts."' .. script.name .. '"', where = where,
                                   why = string.format('is published in the packed package.json as "%s",'
                                         .. ' which is not the "%s" the package declares',
@@ -165,6 +170,7 @@ local function unpublishable_scripts(config, original, where)
                                   surface = "NPM-SURFACE.md: " .. PUBLISHED_ROW }
     end
   end
+  if next(spaced) ~= nil then config[published.KEY][published.SCRIPT_TEXT] = published.script_text(spaced) end
   return blockers
 end
 
