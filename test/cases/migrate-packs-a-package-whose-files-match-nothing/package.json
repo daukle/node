@@ -1,0 +1,7 @@
+{
+  "name": "demo-empty",
+  "version": "1.0.0",
+  "license": "MIT",
+  "files": ["dist"],
+  "scripts": { "check": "node --version" }
+}
