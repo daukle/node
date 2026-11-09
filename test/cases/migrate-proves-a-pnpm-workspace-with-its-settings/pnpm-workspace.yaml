@@ -1,0 +1,17 @@
+packages:
+  - 'packages/*'
+
+# resolution only, kept for the file's own sake
+minimumReleaseAge: 1440 # one day
+minimumReleaseAgeExclude:
+  - debug
+autoInstallPeers: false
+overrides:
+  ms: 2.1.3
+hoistPattern:
+- '*'
+allowBuilds:
+  esbuild: true
+peerDependencyRules:
+  allowedVersions:
+    typescript: '>=5 <7'

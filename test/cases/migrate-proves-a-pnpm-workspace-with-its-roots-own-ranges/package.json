@@ -1,0 +1,15 @@
+{
+  "private": true,
+  "packageManager": "pnpm@10.34.9",
+  "dependencies": {
+    "a": "workspace:*",
+    "c_d": "file:packages/c_d",
+    "debug": "4.3.4",
+    "ms": "catalog:",
+    "semver": "catalog:tools_x"
+  },
+  "scripts": {
+    "start": "node src/main.js",
+    "ver": "semver 1.2.3"
+  }
+}

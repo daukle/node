@@ -55,6 +55,8 @@ return {
   reads("reads named catalogs", "catalogs:\n  react17:\n    react: ^17.0.2\n  react18:\n    react: ^18.2.0\n",
         "catalogs", { react17 = { react = "^17.0.2" }, react18 = { react = "^18.2.0" } }),
   reads("lists shadcn's allowBuilds as unknown", SHADCN, "unknown", { "allowBuilds" }),
+  reads("carries an unknown key and its nested and zero-indent lines", "hoistPattern:\n- a\nallowBuilds:\n  b: true\n",
+        "carried", { "hoistPattern:", "- a", "allowBuilds:", "  b: true" }),
   reads("reads shadcn's packages past its unknown key", SHADCN, "packages", { "apps/*", "packages/*" }),
   reads("reads a block list at zero indent", "packages:\n- 'packages/*'\n- apps/*\n", "packages",
         { "packages/*", "apps/*" }),
@@ -105,6 +107,26 @@ return {
   renders("renders the catalogs sorted", RENDERED,
           "packages:\n  - 'packages/a'\n  - 'packages/it''s'\ncatalog:\n  '@types/node': '20.0.0'\n  'react': '^18.2.0'\n"
           .. "catalogs:\n  'legacy':\n    'react': '^17.0.2'\n"),
+  renders("renders the settings after the catalogs as written",
+          { members = {}, catalog = { a = "1" }, settings = "hoistPattern:\n- '*'\nminimumReleaseAge: 1 # day" },
+          "packages: []\ncatalog:\n  'a': '1'\nhoistPattern:\n- '*'\nminimumReleaseAge: 1 # day\n"),
+  raises("refuses a flow mapping with no space after its brace", "{packages: ['a/*']}\n", "is not a shape"),
+  raises("refuses a value with a colon at the start of a line", "http://example.com\n", "is not a shape"),
+  { name = "a catalog's name keeps its case", check = function()
+    return expect.equal(pnpm_workspace.catalog_range({ catalogs = { Tools = { a = "1" } } }, "a", "catalog:Tools"), "1")
+  end },
+  { name = "the default catalog can be named in catalogs", check = function()
+    return expect.equal(pnpm_workspace.catalog_range({ catalogs = { default = { a = "1" } } }, "a", "catalog:"), "1")
+  end },
+  { name = "a range that is no catalog has no catalog range", check = function()
+    return expect.equal(pnpm_workspace.catalog_range({ catalog = { a = "1" } }, "a", "workspace:*"), nil)
+  end },
+  { name = "settings may hold settings", check = function()
+    return expect.equal(pnpm_workspace.settings_problem("hoist: true\n"), nil)
+  end },
+  { name = "settings may not declare an empty packages list", check = function()
+    return expect.contains(pnpm_workspace.settings_problem("packages: []\n"), "keys of their own")
+  end },
   reads_back("packages", { "packages/a", "packages/it's" }),
   reads_back("catalog", { react = "^18.2.0", ["@types/node"] = "20.0.0" }),
   reads_back("catalogs", { legacy = { react = "^17.0.2" } }),
