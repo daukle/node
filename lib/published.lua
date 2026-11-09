@@ -14,6 +14,10 @@ published.FIELDS = { name = true, version = true, description = true, license = 
                      bugs = true, private = true, funding = true, main = true, exports = true, files = true,
                      publishConfig = true }
 
+--- A key of the table that is no field of the manifest, each script's text where it spaces its
+--- words differently from what its steps render.
+published.SCRIPT_TEXT = "scriptText"
+
 local function json_string(text)
   local escaped = string.gsub(text, '[%c"\\]', function(character)
     if character == '"' then return '\\"' end
@@ -98,6 +102,15 @@ end
 --- blocked by the migrator's comparison rather than published changed.
 published.render = render_list
 
+local function collapsed(text)
+  return (string.gsub(string.gsub(text, "%s+", " "), "^ ?(.-) ?$", "%1"))
+end
+
+--- Whether two command lines differ at most in the spaces between and around their words.
+function published.same_words(left, right)
+  return collapsed(left) == collapsed(right)
+end
+
 local function object_of(names, values)
   local parts = {}
   for _, name in ipairs(names) do parts[#parts + 1] = json_string(name) .. ": " .. json_string(values[name]) end
@@ -111,17 +124,33 @@ local function sorted(map)
   return names
 end
 
+--- `name`'s line as its author spaced it when `scriptText` still holds the same words: an edit to
+--- the steps changes the words, and then the steps win.
+local function spaced_as_written(exact, name, rendered)
+  local text = exact[name]
+  if type(text) == "string" and published.same_words(text, rendered) then return text end
+  return rendered
+end
+
+--- The JSON text of a `scriptText` value.
+function published.script_text(texts)
+  return object_of(sorted(texts), texts)
+end
+
 --- The packed manifest's text: the table's fields, the type, the scripts rendered back, the
 --- dependency ranges the lockfile was resolved from, and every carried field.
 function published.manifest(spec)
   local members = {}
-  for _, name in ipairs(sorted(spec.published)) do members[#members + 1] = json_string(name) .. ": " .. spec.published[name] end
+  for _, name in ipairs(sorted(spec.published)) do
+    if name ~= published.SCRIPT_TEXT then members[#members + 1] = json_string(name) .. ": " .. spec.published[name] end
+  end
+  local exact = spec.published[published.SCRIPT_TEXT] ~= nil and daukle.json_parse(spec.published[published.SCRIPT_TEXT]) or {}
   if spec.type ~= nil then members[#members + 1] = '"type": ' .. json_string(spec.type) end
   if #spec.scripts > 0 then
     local script_names, rendered = {}, {}
     for index, script in ipairs(spec.scripts) do
       script_names[index] = script.name
-      rendered[script.name] = published.render(script.steps)
+      rendered[script.name] = spaced_as_written(exact, script.name, published.render(script.steps))
     end
     members[#members + 1] = '"scripts": ' .. object_of(script_names, rendered)
   end

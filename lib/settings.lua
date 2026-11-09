@@ -235,7 +235,7 @@ local function published_of(config)
   end
   for name, text in pairs(value) do
     local label = '"' .. published.KEY .. "." .. tostring(name) .. '"'
-    if not published.FIELDS[name] then
+    if not published.FIELDS[name] and name ~= published.SCRIPT_TEXT then
       error(label .. " is not a field this table publishes: it holds the name, version, metadata,"
             .. ' "main", "exports", "files" and "publishConfig", and every other field has a key of its own', 0)
     end
