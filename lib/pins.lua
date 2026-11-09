@@ -84,7 +84,8 @@ local function places_no_peer_only_package(packages)
 end
 
 --- The pins set on `config`, or nil when there are none. Returns `{ text, entries, packages,
---- package_ranges, dev_packages, dev_ranges, peer_free, overrides }`, the ranges read from the lockfile's
+--- package_ranges, dev_packages, dev_ranges, peer_packages, peer_ranges, optional_packages, optional_ranges,
+--- peer_meta, peer_free, overrides }`, the ranges read from the lockfile's
 --- root entry, so the package.json npm checks the lockfile against is the one it was resolved from.
 local function read(config)
   local lock = config[KEY]
@@ -109,6 +110,11 @@ local function read(config)
     package_ranges = root.dependencies or {},
     dev_packages = sorted_names(root.devDependencies),
     dev_ranges = root.devDependencies or {},
+    peer_packages = sorted_names(root.peerDependencies),
+    peer_ranges = root.peerDependencies or {},
+    optional_packages = sorted_names(root.optionalDependencies),
+    optional_ranges = root.optionalDependencies or {},
+    peer_meta = lock.peerPackagesMeta,
     overrides = lock.overrides,
   }
 end

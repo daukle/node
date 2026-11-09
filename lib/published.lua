@@ -158,6 +158,11 @@ function published.manifest(spec)
   if #spec.dev_packages > 0 then
     members[#members + 1] = '"devDependencies": ' .. object_of(spec.dev_packages, spec.dev_ranges)
   end
+  if #spec.peer_packages > 0 then members[#members + 1] = '"peerDependencies": ' .. object_of(spec.peer_packages, spec.peer_ranges) end
+  if #spec.optional_packages > 0 then
+    members[#members + 1] = '"optionalDependencies": ' .. object_of(spec.optional_packages, spec.optional_ranges)
+  end
+  if spec.peer_meta ~= nil then members[#members + 1] = '"peerDependenciesMeta": ' .. spec.peer_meta end
   for _, name in ipairs(spec.field_names or {}) do members[#members + 1] = json_string(name) .. ": " .. spec.fields[name] end
   return "{\n  " .. table.concat(members, ",\n  ") .. "\n}\n"
 end

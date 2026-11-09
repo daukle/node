@@ -1,0 +1,1 @@
+{"private":true,"peerDependencies":{"kind-of":"^6.0.0"},"devDependencies":{"kind-of":"6.0.3"},"scripts":{"check":"node src/check.js"}}

@@ -188,22 +188,28 @@ end
 local function dependencies_of(config, lock_text)
   local packages, dev_packages, npm_config = config.packages, config.devPackages, config.npmConfig
   local npmrc_where, overrides, pnpm = config.npmrc, config.overrides, config.pnpm
+  local peer_packages, optional_packages, peer_meta = config.peerPackages, config.optionalPackages, config.peerPackagesMeta
   config.npmConfig, config.npmrc, config.pnpm = nil, nil, nil
   if type(config[pnpm_workspace.KEY]) == "string" then return {} end
   config.packages, config.devPackages, config.overrides = nil, nil, nil
+  config.peerPackages, config.optionalPackages, config.peerPackagesMeta = nil, nil, nil
   local is_workspace_root = type(config[pnpm_workspace.KEY]) == "table"
-  if lock_text == nil or not (is_workspace_root or has_any(packages) or has_any(dev_packages)) then return {} end
+  local declares_any = has_any(packages) or has_any(dev_packages) or has_any(peer_packages) or has_any(optional_packages)
+  if lock_text == nil or not (is_workspace_root or declares_any) then return {} end
   if pnpm ~= nil then
     return { { kind = "dependencies", id = "pnpm",
                config = { version = config.version, pnpm = pnpm, packages = packages or {},
                           devPackages = dev_packages or {}, lock = lock_text, overrides = overrides,
+                          peerPackages = peer_packages, optionalPackages = optional_packages,
+                          peerPackagesMeta = peer_meta,
                           workspace = is_workspace_root or nil } } }
   end
   return { { kind = "dependencies", id = "npm",
              config = { version = config.version, packages = packages or {},
                         devPackages = dev_packages or {}, lock = lock_text,
                         npmConfig = has_any(npm_config) and npm_config or nil, npmrc = npmrc_where,
-                        overrides = overrides } } }
+                        overrides = overrides, peerPackages = peer_packages,
+                        optionalPackages = optional_packages, peerPackagesMeta = peer_meta } } }
 end
 
 local function result(context, config, blockers, owned, lock_text)
@@ -245,11 +251,19 @@ local function ranges_npm_installs(ranges, workspace)
   return installable
 end
 
+local function probe_ranges(field, ranges, workspace)
+  if not has_any(ranges) then return "" end
+  return ', "' .. field .. '": ' .. json_object(ranges_npm_installs(ranges, workspace))
+end
+
 local function npm_install_for_probe(context, root, pick, config, env)
   local workspace = config[pnpm_workspace.KEY]
   daukle.write{ path = "migrate-probe/package.json", text = '{' .. PROBE_IDENTITY
                 .. ', "private": true, "dependencies": ' .. json_object(ranges_npm_installs(config.packages, workspace))
                 .. ', "devDependencies": ' .. json_object(ranges_npm_installs(config.devPackages, workspace))
+                .. probe_ranges("peerDependencies", config.peerPackages, workspace)
+                .. probe_ranges("optionalDependencies", config.optionalPackages, workspace)
+                .. (config.peerPackagesMeta == nil and "" or (', "peerDependenciesMeta": ' .. config.peerPackagesMeta))
                 .. (config.overrides == nil and "" or (', "overrides": ' .. config.overrides)) .. '}\n' }
   local install = daukle.exec(root:tool(pick.node), { root:path(pick.npm), "install",
                                                       "--ignore-scripts", "--include=dev" },
@@ -592,6 +606,7 @@ end
 
 local function has_dependencies(config)
   return has_any(config.packages) or has_any(config.devPackages)
+         or has_any(config.peerPackages) or has_any(config.optionalPackages)
 end
 
 --- Takes the nested package.json files that only mark a format boundary out of `facts.nested`,
