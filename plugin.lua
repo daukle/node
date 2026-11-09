@@ -164,6 +164,17 @@ local function derived_from_package_root(context)
   return paths.climb_from(package_root(context)) .. "build/daukle/" .. context.toolchain.name
 end
 
+--- The directory of the bin runner for `step`: its own instance's, or for a command only the
+--- workspace root provides the root's, whose runner reads the root's modules.
+local function bin_runner_directory(context, spec, step)
+  if not step.from_workspace_root then return derived_from_package_root(context) .. "/" end
+  if spec.workspace_root == nil then
+    error(string.format('a step of this block runs "%s" with "fromWorkspaceRoot", and this block is no'
+                        .. ' workspace member, so it has no workspace root', step.name), 0)
+  end
+  return paths.climb_from(package_root(context)) .. "build/daukle/" .. spec.workspace_root .. "/"
+end
+
 --- Places this instance's generated files at its package root and links its node_modules there.
 local function place_at_package_root(context, root, pick)
   daukle.exec(root:tool(pick.node), { "./" .. links.SCRIPT_NAME, context.root })
@@ -504,7 +515,7 @@ local function run_step(context, spec, step, extra, passed)
   end
   local argv = { step.name, step.binName or "" }
   for _, argument in ipairs(expanded(context, joined(step.args, extra), passed)) do argv[#argv + 1] = argument end
-  return run_module(context, root, pick, runner .. runners.BIN_RUNNER_NAME, argv, step.env)
+  return run_module(context, root, pick, bin_runner_directory(context, spec, step) .. runners.BIN_RUNNER_NAME, argv, step.env)
 end
 
 --- Runs steps until one fails, `extra` going to the last, and returns the exit code: 0, or the

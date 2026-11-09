@@ -162,7 +162,8 @@ local function checked_step(step, where)
                             where, kind, key), 0)
       end
       kind = key
-    elseif key ~= "args" and key ~= "binName" and key ~= "env" and key ~= "package" and key ~= "shorthand" then
+    elseif key ~= "args" and key ~= "binName" and key ~= "env" and key ~= "package" and key ~= "shorthand"
+           and key ~= "fromWorkspaceRoot" then
       error(string.format('"%s" is not a key a step knows, in %s: a step names one of "module",'
                           .. ' "bin", "script" or "remove". There is no shell and no "npx": for anything'
                           .. ' else, use a manifest task\'s run = { tool, args }', key, where), 0)
@@ -181,6 +182,9 @@ local function checked_step(step, where)
   if kind ~= "bin" and step.binName ~= nil then
     error(string.format('%s has a "binName" without a "bin"', where), 0)
   end
+  if step.fromWorkspaceRoot ~= nil and (kind ~= "bin" or step.fromWorkspaceRoot ~= true) then
+    error(string.format('%s has a "fromWorkspaceRoot", which only a "bin" can set, and only to true', where), 0)
+  end
   if kind ~= "script" and (step.package ~= nil or step.shorthand ~= nil) then
     error(string.format('%s has a "package" or "shorthand" without a "script"', where), 0)
   end
@@ -195,7 +199,7 @@ local function checked_step(step, where)
   end
   return { kind = kind, name = step[kind], args = checked_args(step.args, where),
            binName = step.binName, env = checked_env(step.env, where), package = step.package,
-           shorthand = step.shorthand }
+           shorthand = step.shorthand, from_workspace_root = step.fromWorkspaceRoot }
 end
 
 --- An `echo` step: the words it prints, as `echo` would, joined by one space.

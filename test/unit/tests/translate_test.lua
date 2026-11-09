@@ -48,6 +48,15 @@ local function resolves(bins, wanted_step)
   end }
 end
 
+local function resolves_for_a_member(bins, root_bins, wanted_step)
+  return { name = "resolves a member's command against " .. expect.render(bins) .. " and " .. expect.render(root_bins), check = function()
+    local result = translate.package('{"scripts":{"build":"tsc -p ."}}', "package.json")
+    local blockers = translate.resolve_commands(result.config, bins, "package.json", root_bins)
+    if #blockers > 0 then return "blocked: " .. joined(blockers) end
+    return expect.equal(result.config.scripts.build, wanted_step)
+  end }
+end
+
 local function command_blocked(bins, needle)
   return { name = "blocks the command against " .. expect.render(bins), check = function()
     local result = translate.package('{"scripts":{"build":"tsc -p ."}}', "package.json")
@@ -178,6 +187,10 @@ return {
   resolves({ tsc = { provider("@scope/tsc", false) } }, { bin = "@scope/tsc", args = { "-p", "." } }),
   resolves({ tsc = { provider("@scope/tsc", true) } },
            { bin = "@scope/tsc", binName = "tsc", args = { "-p", "." } }),
+  resolves_for_a_member({}, { tsc = { provider("typescript", true) } },
+                        { bin = "typescript", binName = "tsc", args = { "-p", "." }, fromWorkspaceRoot = true }),
+  resolves_for_a_member({ tsc = { provider("own", true) } }, { tsc = { provider("typescript", true) } },
+                        { bin = "own", binName = "tsc", args = { "-p", "." } }),
   command_blocked({}, "no installed package provides"),
   command_blocked({ tsc = { provider("a", true), provider("b", false) } }, "both a and b"),
 }
