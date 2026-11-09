@@ -1,0 +1,8 @@
+{
+  "name": "outer",
+  "version": "2.7.16",
+  "packageManager": "pnpm@8.9.2",
+  "files": ["dist"],
+  "main": "dist/index.js",
+  "dependencies": { "debug": "4.3.4" }
+}

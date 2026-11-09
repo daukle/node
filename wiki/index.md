@@ -190,8 +190,9 @@ toolchain cannot.
   `node_modules` provides the command, the one npm's own `.bin` links when two do, joined by `&&`.
   `pnpm run <name>`, `pnpm test`, `pnpm start` and the `pnpm <name>` shorthand translate as
   `npm run` does, unless the name is one of pnpm's own commands.
-- Metadata that no build reads: `name`, `version`, `description`, `license`, `author`,
-  `contributors`, `keywords`, `repository`, `homepage`, `bugs`, `private`, `funding`.
+- `name` and `version`, kept in the generated `package.json`, because a program can read them back.
+- Metadata that no build reads: `description`, `license`, `author`, `contributors`, `keywords`,
+  `repository`, `homepage`, `bugs`, `private`, `funding`.
 - A `package-lock.json` and `node_modules`, which move aside.
 
 **What blocks**
