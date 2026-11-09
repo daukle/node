@@ -326,8 +326,19 @@ daukle.task{
 --- daukle.toml renders.
 local TREE_WORKSPACE = "tree-workspace"
 
+--- The project's patch files copied to their paths in `TREE_WORKSPACE`, where its rendered workspace
+--- file names them and pnpm, resolving them against it, reads them.
+local function place_tree_patch_files(context, spec)
+  local project = package_root(context)
+  for _, file in ipairs(pnpm_workspace.patch_files(spec.workspace.settings or "")) do
+    daukle.write{ path = TREE_WORKSPACE .. "/" .. file,
+                  text = daukle.read(project == "." and file or project .. "/" .. file) }
+  end
+end
+
 --- The workspace rebuilt in `TREE_WORKSPACE` from the rendered root and member package.json files,
---- the rendered workspace file and the pinned lockfile, and installed there through the mirror.
+--- the rendered workspace file, its patch files and the pinned lockfile, and installed there
+--- through the mirror.
 ---
 --- @implNote rebuilt rather than installed in the project's tree, because the proof runs while the
 --- author's own package.json files are still at their paths; and its own workspace file is the
@@ -338,6 +349,7 @@ local function install_tree_workspace(context, spec, root, pick)
   daukle.write{ path = TREE_WORKSPACE .. "/package.json", text = settings.package_json(spec) }
   daukle.write{ path = TREE_WORKSPACE .. "/" .. pnpm_workspace.NAME, text = pnpm_workspace.render(spec.workspace) }
   daukle.write{ path = TREE_WORKSPACE .. "/pnpm-lock.yaml", text = spec.pnpm_lock.text }
+  place_tree_patch_files(context, spec)
   for _, member in ipairs(spec.workspace.members) do
     local generated = daukle.read("build/daukle/" .. member.instance .. "/package.json")
     if generated == nil then
