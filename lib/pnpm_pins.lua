@@ -30,7 +30,10 @@ local function checked_pnpm(pnpm)
 end
 
 --- The pins set on `config`, or nil when there are none. Returns `{ text, pnpm, entries, packages,
---- package_ranges, dev_packages, dev_ranges, overrides }`.
+--- package_ranges, dev_packages, dev_ranges, peer_packages, peer_ranges, optional_packages, optional_ranges,
+--- peer_meta, overrides }`.
+---
+--- @implNote a pin file written before `D-268` holds no peers or optionals, which means none.
 local function read(config)
   local lock = config[KEY]
   if lock == nil then return nil end
@@ -40,12 +43,17 @@ local function read(config)
   if lock.overrides ~= nil and type(lock.overrides) ~= "string" then edited("has overrides that are not JSON text") end
   local packages, package_ranges = checked_ranges(lock.dependencies, "dependencies")
   local dev_packages, dev_ranges = checked_ranges(lock.devDependencies, "devDependencies")
+  local peer_packages, peer_ranges = checked_ranges(lock.peerDependencies or {}, "peerDependencies")
+  local optional_packages, optional_ranges = checked_ranges(lock.optionalDependencies or {}, "optionalDependencies")
   return {
     text = lock.text,
     pnpm = checked_pnpm(lock.pnpm),
     entries = pins.checked_entries(lock.entries, KEY),
     packages = packages, package_ranges = package_ranges,
     dev_packages = dev_packages, dev_ranges = dev_ranges,
+    peer_packages = peer_packages, peer_ranges = peer_ranges,
+    optional_packages = optional_packages, optional_ranges = optional_ranges,
+    peer_meta = lock.peerPackagesMeta,
     overrides = lock.overrides,
   }
 end

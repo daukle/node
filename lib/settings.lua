@@ -14,6 +14,9 @@ local KNOWN_KEYS = { version = true, entry = true, scripts = true, type = true,
 
 local MOVED_TO_NPM = { packages = true, devPackages = true }
 
+--- Keys a workspace member holds in its own block and any other package in its resolver's.
+local RESOLVER_KEYS = { peerPackages = true, optionalPackages = true, peerPackagesMeta = true }
+
 local WORKSPACE_PREFIXES = { "workspace:", "catalog:", "file:" }
 
 --- The fields the generated package.json writes itself, which `packageFields` cannot name.
@@ -38,7 +41,11 @@ local function reject_unknown_keys(config)
       error(string.format('"%s" moved to [toolchains.npm] in daukle/node 4, where daukle/npm pins'
                           .. ' the closure it resolves to: an install resolves no range', key), 0)
     end
-    if KNOWN_KEYS[key] == nil and not MOVED_TO_NPM[key] then
+    if RESOLVER_KEYS[key] and not is_workspace_member(config) then
+      error(string.format('"%s" belongs in [toolchains.npm] or [toolchains.pnpm], which pin the closure'
+                          .. ' it resolves to: an install resolves no range', key), 0)
+    end
+    if KNOWN_KEYS[key] == nil and not MOVED_TO_NPM[key] and not RESOLVER_KEYS[key] then
       error(string.format('"%s" is not a key this toolchain knows: a misspelled key would'
                           .. ' otherwise be ignored and build the wrong thing silently', key), 0)
     end
@@ -144,14 +151,20 @@ local function sorted_names(map)
   return names
 end
 
---- A workspace member's own ranges, checked: `packages` and `devPackages`, each a map.
+--- A workspace member's own ranges, checked: `packages`, `devPackages`, `peerPackages` and
+--- `optionalPackages`, each a map, and `peerPackagesMeta`, one JSON value as text.
 local function check_member_ranges(config)
-  for _, pair in ipairs({ { "packages", "dependencies" }, { "devPackages", "devDependencies" } }) do
+  for _, pair in ipairs({ { "packages", "dependencies" }, { "devPackages", "devDependencies" },
+                          { "peerPackages", "peerDependencies" }, { "optionalPackages", "optionalDependencies" } }) do
     local map = config[pair[1]]
     if map ~= nil then
       if type(map) ~= "table" then error('"' .. pair[1] .. '" must be a table of package name to range', 0) end
       checked_ranges(sorted_names(map), map, pair[2], true)
     end
+  end
+  local meta = config.peerPackagesMeta
+  if meta ~= nil and (type(meta) ~= "string" or not package_fields.is_json_value(meta)) then
+    error('"peerPackagesMeta" must be one JSON object as text', 0)
   end
 end
 
@@ -171,6 +184,19 @@ local function carried_fields(names, values)
   local text = ""
   for _, name in ipairs(names or {}) do text = text .. ',\n  "' .. name .. '": ' .. values[name] end
   return text
+end
+
+--- A dependency map after a separator, or nothing for a field the package does not declare.
+local function declared_ranges(field, names, ranges)
+  if #names == 0 then return "" end
+  return ',\n  "' .. field .. '": ' .. json_object(names, ranges, "  ")
+end
+
+--- The peer and optional fields, every one of which npm and pnpm compare with their lockfile.
+local function peer_and_optional_fields(spec)
+  return declared_ranges("peerDependencies", spec.peer_packages, spec.peer_ranges)
+    .. declared_ranges("optionalDependencies", spec.optional_packages, spec.optional_ranges)
+    .. (spec.peer_meta == nil and "" or (',\n  "peerDependenciesMeta": ' .. spec.peer_meta))
 end
 
 --- The JSON text of the name the package resolves itself by, or nil when it `exports` nothing.
@@ -208,7 +234,8 @@ local function pinned_of(config)
     error("this toolchain carries both npm's and pnpm's pins, and a package root installs with one"
           .. " package manager: remove one of [toolchains.npm] and [toolchains.pnpm]", 0)
   end
-  return npm_pinned or pnpm_pinned or { packages = {}, package_ranges = {}, dev_packages = {}, dev_ranges = {} },
+  return npm_pinned or pnpm_pinned or { packages = {}, package_ranges = {}, dev_packages = {}, dev_ranges = {},
+                                        peer_packages = {}, peer_ranges = {}, optional_packages = {}, optional_ranges = {} },
          pnpm_pinned
 end
 
@@ -221,6 +248,7 @@ local function package_json(spec)
     .. '  "private": true,\n'
     .. '  "dependencies": ' .. json_object(spec.packages, spec.package_ranges, "  ") .. ',\n'
     .. '  "devDependencies": ' .. json_object(spec.dev_packages, spec.dev_ranges, "  ")
+    .. peer_and_optional_fields(spec)
     .. overrides_field(spec)
     .. carried_fields(spec.field_names, spec.fields) .. '\n'
     .. '}\n'
@@ -338,11 +366,16 @@ local function read(context)
   local in_workspace = config[pnpm_workspace.KEY] ~= nil
   checked_ranges(pinned.packages, pinned.package_ranges, "dependencies", in_workspace)
   checked_ranges(pinned.dev_packages, pinned.dev_ranges, "devDependencies", in_workspace)
+  checked_ranges(pinned.peer_packages, pinned.peer_ranges, "peerDependencies", in_workspace)
+  checked_ranges(pinned.optional_packages, pinned.optional_ranges, "optionalDependencies", in_workspace)
   local workspace_root = workspace_root_of(config)
   if workspace_root ~= nil then
     check_member_ranges(config)
     pinned.packages, pinned.package_ranges = member_packages(config, "packages")
     pinned.dev_packages, pinned.dev_ranges = member_packages(config, "devPackages")
+    pinned.peer_packages, pinned.peer_ranges = member_packages(config, "peerPackages")
+    pinned.optional_packages, pinned.optional_ranges = member_packages(config, "optionalPackages")
+    pinned.peer_meta = config.peerPackagesMeta
   end
   local declared_scripts = scripts.read(config)
   local field_names, fields = package_fields.checked(config, WRITTEN)
@@ -357,6 +390,11 @@ local function read(context)
     package_ranges = pinned.package_ranges,
     dev_packages = pinned.dev_packages,
     dev_ranges = pinned.dev_ranges,
+    peer_packages = pinned.peer_packages,
+    peer_ranges = pinned.peer_ranges,
+    optional_packages = pinned.optional_packages,
+    optional_ranges = pinned.optional_ranges,
+    peer_meta = pinned.peer_meta,
     overrides = pinned.overrides,
     lock = pinned.text ~= nil and pnpm_lock == nil and pinned or nil,
     pnpm_lock = pnpm_lock,

@@ -1,0 +1,1 @@
+{"private":true,"packageManager":"pnpm@10.34.9","dependencies":{"is-number":"7.0.0"},"peerDependencies":{"is-odd":"^3.0.0","is-even":"^1.0.0","kind-of":"^6.0.0"},"peerDependenciesMeta":{"is-even":{"optional":true}},"optionalDependencies":{"is-buffer":"^2.0.5"},"devDependencies":{"kind-of":"6.0.3"},"scripts":{"check":"node src/check.js"}}
