@@ -1,0 +1,7 @@
+{
+  "name": "prepacked",
+  "version": "2.0.0",
+  "main": "dist/index.js",
+  "files": ["dist"],
+  "scripts": { "prepack": "node build.js", "postpack": "node clean.js" }
+}

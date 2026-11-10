@@ -1239,6 +1239,12 @@ end
 
 --- @implNote neither a workspace's root nor its members install here: each reads its old tree from
 --- the one install of the original workspace the root's `run` made.
+--- Whether `npm pack` and `pnpm pack` run one of this package's own scripts.
+local function runs_a_script_when_packed(original_scripts)
+  if type(original_scripts) ~= "table" then return false end
+  return original_scripts.prepare ~= nil or original_scripts.prepack ~= nil or original_scripts.postpack ~= nil
+end
+
 local function build(context)
   local where = within(context.dir, "package.json")
   local translation = translation_of(context, workspace_root_of(context))
@@ -1272,7 +1278,7 @@ local function build(context)
   if translation.config[published.KEY] ~= nil then
     daukle.write{ path = "migrate-old/" .. pack.SCRIPT_NAME, text = pack.SCRIPT }
     local climb = paths.climb_from(context.dir)
-    local has_prepare = type(translation.original_scripts) == "table" and translation.original_scripts.prepare ~= nil
+    local has_prepare = runs_a_script_when_packed(translation.original_scripts)
     local argv = { climb .. derived(context, "migrate-old/" .. pack.SCRIPT_NAME), "in-place", root:path(pick.npm), ".",
                    climb .. derived(context, "migrate-old") }
     if is_member or is_workspace_root then
