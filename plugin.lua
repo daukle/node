@@ -46,10 +46,8 @@ daukle.toolchain{
       files["pnpm-lock.yaml"] = spec.pnpm_lock.text
       files[pnpm_mirror.SCRIPT_NAME] = pnpm_mirror.SCRIPT
     end
-    if spec.published ~= nil then
-      files[pack.MANIFEST_NAME] = published.manifest(spec)
-      files[pack.SCRIPT_NAME] = pack.SCRIPT
-    end
+    if spec.published ~= nil then files[pack.MANIFEST_NAME] = published.manifest(spec) end
+    if spec.published ~= nil or spec.workspace ~= nil then files[pack.SCRIPT_NAME] = pack.SCRIPT end
     return files
   end,
 }
@@ -338,14 +336,24 @@ daukle.task{
   end,
 }
 
---- Points this instance's derived `node_modules`, where a script step resolves, at its project's
---- modules in the source workspace.
+--- Points a derived `node_modules`, where a script step resolves, at a project's modules in the
+--- source workspace.
+local function link_source_modules(node, npm, root_instance, project, link)
+  daukle.exec(node, { "./" .. pack.SCRIPT_NAME, "link-modules", npm,
+                      "../" .. root_instance .. "/" .. SOURCE_WORKSPACE .. "/" .. project .. "node_modules", link })
+end
+
+--- Links this instance's modules, and for a member its root's too, since a step with
+--- `fromWorkspaceRoot` runs the command from the root's derived directory.
 local function use_source_workspace_modules(context, spec, node, npm)
   local root_instance = spec.workspace_root or context.toolchain.name
   run_task_of(root_instance .. ":source-workspace")
-  local member = spec.workspace_root ~= nil and (member_dir_in_root(context, spec) .. "/") or ""
-  daukle.exec(node, { "./" .. pack.SCRIPT_NAME, "link-modules", npm,
-                      "../" .. root_instance .. "/" .. SOURCE_WORKSPACE .. "/" .. member .. "node_modules", "node_modules" })
+  if spec.workspace_root == nil then
+    link_source_modules(node, npm, root_instance, "", "node_modules")
+    return
+  end
+  link_source_modules(node, npm, root_instance, member_dir_in_root(context, spec) .. "/", "node_modules")
+  link_source_modules(node, npm, root_instance, "", "../" .. root_instance .. "/node_modules")
 end
 
 --[[ @implNote no dependsOn node:install: the migration proof packs while the
