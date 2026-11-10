@@ -1,0 +1,9 @@
+{
+  "name": "prepared-root",
+  "version": "1.5.0",
+  "packageManager": "pnpm@10.34.9",
+  "files": ["dist"],
+  "main": "dist/index.js",
+  "dependencies": { "debug": "4.3.4" },
+  "scripts": { "prepare": "node build.js" }
+}

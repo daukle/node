@@ -17,14 +17,18 @@ local SCRIPT = [==[
 import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, relative, resolve } from "node:path";
 
 const [mode, npmCli, ...rest] = process.argv.slice(2);
+
+function withNodeOnPath() {
+  return { ...process.env, PATH: dirname(process.execPath) + delimiter + (process.env.PATH ?? "") };
+}
 
 function npm(directory, destination, args, capture) {
   const result = spawnSync(process.execPath, [npmCli, ...args, "--cache", join(destination, "npm-cache-pack")],
     { cwd: directory, encoding: "utf8", stdio: ["ignore", capture ? "pipe" : "inherit", "inherit"],
-      env: { ...process.env, PATH: dirname(process.execPath) + delimiter + (process.env.PATH ?? "") } });
+      env: withNodeOnPath() });
   if (result.status !== 0) throw new Error(`npm ${args[0]} exited with code ${result.status}`);
   return result.stdout;
 }
@@ -62,7 +66,7 @@ function copyTree(source, target, path) {
   mkdirSync(target, { recursive: true });
   for (const entry of readdirSync(source, { withFileTypes: true })) {
     const child = path === "" ? entry.name : `${path}/${entry.name}`;
-    if (NOT_COPIED.has(entry.name) || child === "build/daukle") continue;
+    if (NOT_COPIED.has(entry.name) || isDerived(`${child}/`)) continue;
     if (entry.isDirectory()) copyTree(join(source, entry.name), join(target, entry.name), child);
     else if (entry.isFile()) copyFileSync(join(source, entry.name), join(target, entry.name));
   }
@@ -106,7 +110,7 @@ function runPnpmPack(pnpmEntry, modules, directory, destination) {
   if (linked) linkDirectory(modules, link);
   try {
     return spawnSync(process.execPath, [pnpmEntry, "pack", "--pack-destination", destination],
-      { cwd: directory, stdio: ["ignore", "inherit", "inherit"] });
+      { cwd: directory, stdio: ["ignore", "inherit", "inherit"], env: withNodeOnPath() });
   } finally {
     if (linked) rmSync(link, { force: true });
   }
@@ -120,6 +124,20 @@ async function packWithPnpm(pnpmEntry, modules, directory, destination) {
   const made = [...tarballs(destination)];
   if (made.length !== 1) throw new Error(`pnpm pack left ${made.length} tarballs in ${destination}`);
   return withoutDerived(join(destination, made[0]), join(destination, "pnpm-pack"));
+}
+
+/** A workspace package as its own pnpm packs it with its scripts: the whole workspace copied and
+ *  installed, since `pnpm install` and `pnpm pack` each run `prepare` and it reads its dependencies. */
+async function packWorkspaceWithScripts(pnpmEntry, workspaceRoot, directory, destination) {
+  const copy = join(destination, "project");
+  rmSync(copy, { recursive: true, force: true });
+  copyTree(workspaceRoot, copy, "");
+  const install = spawnSync(process.execPath, [pnpmEntry, "install", "--frozen-lockfile",
+    "--config.confirmModulesPurge=false", "--store-dir", join(destination, "pnpm-store-pack")],
+    { cwd: copy, stdio: ["ignore", "inherit", "inherit"], env: withNodeOnPath() });
+  if (install.status !== 0) throw new Error(`pnpm install exited with code ${install.status}`);
+  const packageCopy = join(copy, relative(workspaceRoot, directory));
+  return packWithPnpm(pnpmEntry, join(packageCopy, "node_modules"), packageCopy, destination);
 }
 
 /** Keeps the tarball under one name on both sides of the proof, whatever npm named it. */
@@ -183,6 +201,17 @@ if (mode === "stage") {
 } else if (mode === "with-pnpm") {
   const [pnpmEntry, modules, directory, destination] = rest.map((path) => resolve(path));
   record(await packWithPnpm(pnpmEntry, modules, directory, destination), destination);
+} else if (mode === "with-pnpm-scripts") {
+  const [pnpmEntry, workspaceRoot, directory, destination] = rest.map((path) => resolve(path));
+  record(await packWorkspaceWithScripts(pnpmEntry, workspaceRoot, directory, destination), destination);
+} else if (mode === "copy-sources") {
+  const [source, target] = rest.map((path) => resolve(path));
+  rmSync(target, { recursive: true, force: true });
+  copyTree(source, target, "");
+} else if (mode === "link-modules") {
+  const [target, link] = rest.map((path) => resolve(path));
+  rmSync(link, { recursive: true, force: true });
+  linkDirectory(target, link);
 } else if (mode === "in-place") {
   const [directory, destination] = rest.map((path) => resolve(path));
   record(pack(directory, destination), destination);

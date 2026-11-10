@@ -1,0 +1,2 @@
+build/daukle/node/pack/dist/index.js
+build/daukle/node-packages-lib/pack/dist/index.js
