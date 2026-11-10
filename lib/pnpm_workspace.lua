@@ -365,7 +365,22 @@ end
 --- The `pnpm-workspace.yaml` a `{ members, catalog, catalogs, settings }` renders to: each member,
 --- a `{ dir }`, by its directory, then the catalogs, in the shapes `parse` reads back, then the
 --- settings as the original file wrote them, because only pnpm reads those.
-function pnpm_workspace.render(workspace)
+--- Whether this pnpm reads settings, overrides among them, from the workspace file.
+--- @implNote measured 2026-11-10 (D-285): 9.15.9 refuses a workspace file with no `packages`, and
+--- 11.28.5 and 12.18.0 read overrides only from it, ignoring `pnpm.overrides` in package.json.
+function pnpm_workspace.reads_settings(version)
+  return tonumber(string.match(version, "^(%d+)")) >= 10
+end
+
+--- The workspace file's `overrides:` line for a block's overrides text, `{}` for none. The JSON
+--- object is a YAML flow mapping, and no newline is ever inside a JSON string.
+function pnpm_workspace.overrides_line(overrides)
+  if overrides == nil then return "overrides: {}" end
+  return "overrides: " .. (string.gsub(overrides, "%s*\r?\n%s*", " "))
+end
+
+--- @param overrides_line nil, or the `overrides:` line the block's own overrides render as
+function pnpm_workspace.render(workspace, overrides_line)
   local lines = { #workspace.members == 0 and "packages: []" or "packages:" }
   for _, member in ipairs(workspace.members) do lines[#lines + 1] = "  - " .. quoted_scalar(member.dir) end
   if workspace.catalog ~= nil then
@@ -380,6 +395,13 @@ function pnpm_workspace.render(workspace)
     end
   end
   if workspace.settings ~= nil then lines[#lines + 1] = workspace.settings end
+  if overrides_line ~= nil then
+    if workspace.settings ~= nil and string.match("\n" .. workspace.settings, "\noverrides:") then
+      error('the workspace file\'s settings declare "overrides" and so does the package\'s "overrides":'
+            .. " pnpm refuses a key written twice, so keep one of them", 0)
+    end
+    lines[#lines + 1] = overrides_line
+  end
   return table.concat(lines, "\n") .. "\n"
 end
 

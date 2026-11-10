@@ -22,6 +22,25 @@ local nested = daukle.require("lib/nested")
 local pnpm_workspace = daukle.require("lib/pnpm_workspace")
 local instance_name = daukle.require("lib/instance_name")
 
+--- Passed to every frozen pnpm install, since daukle pinned each tarball by sha256 from a resolve
+--- that already applied pnpm's release-age and trust policy.
+--- @implNote measured 2026-11-10 (D-285): on a cold metadata cache pnpm 12.18.0 re-verifies the
+--- lockfile by fetching each package's metadata, which the loopback mirror does not serve, and
+--- fails ERR_PNPM_RESOLVING_NPM_RESOLVER_NETWORK_ERROR; a warm cache hid it in every migrate case.
+local TRUST_LOCKFILE = "--config.trust-lockfile=true"
+
+--- Whether this block installs with a pnpm that reads its overrides from the workspace file.
+local function reads_workspace_settings(spec)
+  return spec.pnpm_lock ~= nil and pnpm_workspace.reads_settings(spec.pnpm_lock.pnpm.version)
+end
+
+--- A pnpm workspace root's own overrides as a workspace file line, or nil when it declares none:
+--- `{}` is not written there, since a carried setting may declare the overrides instead.
+local function workspace_overrides_line(spec)
+  if spec.overrides == nil or not reads_workspace_settings(spec) then return nil end
+  return pnpm_workspace.overrides_line(spec.overrides)
+end
+
 daukle.toolchain{
   name = "node",
   generate = function(context)
@@ -40,7 +59,11 @@ daukle.toolchain{
       [nested.PLACEMENTS_NAME] = nested.placements_json(spec.nested),
       [links.WORKSPACE_NAME] = links.workspace_json(spec),
     }
-    if spec.workspace ~= nil then files[links.WORKSPACE_FILE_NAME] = pnpm_workspace.render(spec.workspace) end
+    if spec.workspace ~= nil then
+      files[links.WORKSPACE_FILE_NAME] = pnpm_workspace.render(spec.workspace, workspace_overrides_line(spec))
+    elseif reads_workspace_settings(spec) then
+      files[pnpm_workspace.NAME] = pnpm_workspace.overrides_line(spec.overrides) .. "\n"
+    end
     if spec.lock ~= nil then files["package-lock.json"] = spec.lock.text end
     if spec.pnpm_lock ~= nil then
       files["pnpm-lock.yaml"] = spec.pnpm_lock.text
@@ -129,7 +152,7 @@ end
 local function install_with_pnpm(context, spec, root, pick)
   local pnpm = pnpm_behind_mirror(context, spec.pnpm_lock)
   daukle.exec(root:tool(pick.node), { "./" .. pnpm_mirror.SCRIPT_NAME, pnpm_mirror.MAP_NAME, pnpm, "install",
-                                      "--frozen-lockfile", "--store-dir", "pnpm-store" })
+                                      "--frozen-lockfile", TRUST_LOCKFILE, "--store-dir", "pnpm-store" })
   return root, pick
 end
 
@@ -256,7 +279,7 @@ local function install_workspace(context, spec, root, pick)
   local pnpm = pnpm_behind_mirror(context, spec.pnpm_lock)
   daukle.exec(root:tool(pick.node), {
     derived .. "/" .. pnpm_mirror.SCRIPT_NAME, derived .. "/" .. pnpm_mirror.MAP_NAME, pnpm, "install",
-    "--frozen-lockfile", "--config.confirmModulesPurge=false", "--modules-dir", links.WORKSPACE_MODULES_DIR,
+    "--frozen-lockfile", TRUST_LOCKFILE, "--config.confirmModulesPurge=false", "--modules-dir", links.WORKSPACE_MODULES_DIR,
     "--virtual-store-dir", derived .. "/pnpm-virtual-store", "--store-dir", derived .. "/pnpm-store",
   }, { cwd = package_root(context) })
   place_at_package_root(context, root, pick)
@@ -308,7 +331,8 @@ end
 local function write_rendered_workspace(spec, directory)
   refuse_a_workspace_without_pins(spec)
   daukle.write{ path = directory .. "/package.json", text = settings.package_json(spec) }
-  daukle.write{ path = directory .. "/" .. pnpm_workspace.NAME, text = pnpm_workspace.render(spec.workspace) }
+  daukle.write{ path = directory .. "/" .. pnpm_workspace.NAME,
+                text = pnpm_workspace.render(spec.workspace, workspace_overrides_line(spec)) }
   daukle.write{ path = directory .. "/pnpm-lock.yaml", text = spec.pnpm_lock.text }
   for _, member in ipairs(spec.workspace.members) do
     daukle.write{ path = directory .. "/" .. member.dir .. "/package.json",
@@ -334,7 +358,7 @@ daukle.task{
     write_rendered_workspace(spec, SOURCE_WORKSPACE)
     local pnpm = pnpm_behind_mirror(context, spec.pnpm_lock)
     daukle.exec(root:tool(pick.node), {
-      "../" .. pnpm_mirror.SCRIPT_NAME, "../" .. pnpm_mirror.MAP_NAME, pnpm, "install", "--frozen-lockfile",
+      "../" .. pnpm_mirror.SCRIPT_NAME, "../" .. pnpm_mirror.MAP_NAME, pnpm, "install", "--frozen-lockfile", TRUST_LOCKFILE,
       "--config.confirmModulesPurge=false", "--store-dir", "../pnpm-store",
     }, { cwd = "build/daukle/" .. context.toolchain.name .. "/" .. SOURCE_WORKSPACE })
   end,
@@ -428,7 +452,7 @@ local function install_tree_workspace(context, spec, root, pick)
   place_tree_patch_files(context, spec)
   local pnpm = pnpm_behind_mirror(context, spec.pnpm_lock)
   daukle.exec(root:tool(pick.node), {
-    "../" .. pnpm_mirror.SCRIPT_NAME, "../" .. pnpm_mirror.MAP_NAME, pnpm, "install", "--frozen-lockfile",
+    "../" .. pnpm_mirror.SCRIPT_NAME, "../" .. pnpm_mirror.MAP_NAME, pnpm, "install", "--frozen-lockfile", TRUST_LOCKFILE,
     "--ignore-scripts", "--config.confirmModulesPurge=false", "--store-dir", "../pnpm-store",
   }, { cwd = "build/daukle/" .. context.toolchain.name .. "/" .. TREE_WORKSPACE })
 end
