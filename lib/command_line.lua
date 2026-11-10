@@ -6,7 +6,7 @@ local SHELL_WORDS = { cd = true, rm = true, cp = true, mv = true, mkdir = true,
                       exec = true, time = true, exit = true, ["true"] = true, ["false"] = true,
                       ["if"] = true, ["then"] = true, ["for"] = true, ["while"] = true,
                       source = true, ["."] = true, sh = true, bash = true, zsh = true, dash = true }
-local RUNNERS = { npx = true, yarn = true, bun = true, deno = true }
+local RUNNERS = { npx = true, pnx = true, pnpx = true, yarn = true, bun = true, deno = true }
 
 --- pnpm's own commands, which win over a script of the same name in `pnpm <name>`.
 local PNPM_COMMANDS = {}
