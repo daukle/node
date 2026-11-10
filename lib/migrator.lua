@@ -1275,14 +1275,16 @@ local function build(context)
     local has_prepare = type(translation.original_scripts) == "table" and translation.original_scripts.prepare ~= nil
     local argv = { climb .. derived(context, "migrate-old/" .. pack.SCRIPT_NAME), "in-place", root:path(pick.npm), ".",
                    climb .. derived(context, "migrate-old") }
-    if has_prepare then
-      argv[2] = "with-scripts"
-    elseif is_member or is_workspace_root then
+    if is_member or is_workspace_root then
       local root_instance = is_member and translation.root.instance or context.instance
-      argv[2] = "with-pnpm"
       local root_directory = "build/daukle/" .. root_instance
+      local workspace_dir = context.dir
+      if is_member then workspace_dir = translation.root.dir end
+      argv[2] = has_prepare and "with-pnpm-scripts" or "with-pnpm"
       table.insert(argv, 4, climb .. root_directory .. "/" .. pnpm_entry_in(root_directory))
-      table.insert(argv, 5, WORKSPACE_MODULES_DIR)
+      table.insert(argv, 5, has_prepare and (climb .. (workspace_dir or ".")) or WORKSPACE_MODULES_DIR)
+    elseif has_prepare then
+      argv[2] = "with-scripts"
     end
     daukle.exec(root:tool(pick.node), argv, { cwd = context.dir or "." })
   end

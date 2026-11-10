@@ -46,10 +46,8 @@ daukle.toolchain{
       files["pnpm-lock.yaml"] = spec.pnpm_lock.text
       files[pnpm_mirror.SCRIPT_NAME] = pnpm_mirror.SCRIPT
     end
-    if spec.published ~= nil then
-      files[pack.MANIFEST_NAME] = published.manifest(spec)
-      files[pack.SCRIPT_NAME] = pack.SCRIPT
-    end
+    if spec.published ~= nil then files[pack.MANIFEST_NAME] = published.manifest(spec) end
+    if spec.published ~= nil or spec.workspace ~= nil then files[pack.SCRIPT_NAME] = pack.SCRIPT end
     return files
   end,
 }
@@ -301,6 +299,63 @@ local function publishable_manifest(context, spec)
   return pack.RESOLVED_MANIFEST_NAME
 end
 
+--- The workspace's rendered root and member package.json files, its rendered workspace file and
+--- the pinned lockfile, written into `directory` below this toolchain's derived directory.
+local function write_rendered_workspace(spec, directory)
+  refuse_a_workspace_without_pins(spec)
+  daukle.write{ path = directory .. "/package.json", text = settings.package_json(spec) }
+  daukle.write{ path = directory .. "/" .. pnpm_workspace.NAME, text = pnpm_workspace.render(spec.workspace) }
+  daukle.write{ path = directory .. "/pnpm-lock.yaml", text = spec.pnpm_lock.text }
+  for _, member in ipairs(spec.workspace.members) do
+    daukle.write{ path = directory .. "/" .. member.dir .. "/package.json",
+                  text = daukle.read("build/daukle/" .. member.instance .. "/package.json") }
+  end
+end
+
+--- The derived directory a workspace package's `prepare` takes its modules from.
+local SOURCE_WORKSPACE = "source-workspace"
+
+--- The workspace rebuilt with its sources and installed, for a `prepare` to read its dependencies
+--- and its siblings' files.
+---
+--- @implNote a separate rebuild rather than `node:install`: the migration proof runs this while the
+--- author's package.json files are at their paths, where placing the generated ones is refused. A
+--- rendered manifest declares no scripts, so only a dependency's own build runs here.
+daukle.task{
+  name = "node:source-workspace",
+  run = function(context)
+    local spec = settings.read(context)
+    local root, pick = provision_node(context, spec)
+    daukle.exec(root:tool(pick.node), { "./" .. pack.SCRIPT_NAME, "copy-sources", root:path(pick.npm), context.root, SOURCE_WORKSPACE })
+    write_rendered_workspace(spec, SOURCE_WORKSPACE)
+    local pnpm = pnpm_behind_mirror(context, spec.pnpm_lock)
+    daukle.exec(root:tool(pick.node), {
+      "../" .. pnpm_mirror.SCRIPT_NAME, "../" .. pnpm_mirror.MAP_NAME, pnpm, "install", "--frozen-lockfile",
+      "--config.confirmModulesPurge=false", "--store-dir", "../pnpm-store",
+    }, { cwd = "build/daukle/" .. context.toolchain.name .. "/" .. SOURCE_WORKSPACE })
+  end,
+}
+
+--- Points a derived `node_modules`, where a script step resolves, at a project's modules in the
+--- source workspace.
+local function link_source_modules(node, npm, root_instance, project, link)
+  daukle.exec(node, { "./" .. pack.SCRIPT_NAME, "link-modules", npm,
+                      "../" .. root_instance .. "/" .. SOURCE_WORKSPACE .. "/" .. project .. "node_modules", link })
+end
+
+--- Links this instance's modules, and for a member its root's too, since a step with
+--- `fromWorkspaceRoot` runs the command from the root's derived directory.
+local function use_source_workspace_modules(context, spec, node, npm)
+  local root_instance = spec.workspace_root or context.toolchain.name
+  run_task_of(root_instance .. ":source-workspace")
+  if spec.workspace_root == nil then
+    link_source_modules(node, npm, root_instance, "", "node_modules")
+    return
+  end
+  link_source_modules(node, npm, root_instance, member_dir_in_root(context, spec) .. "/", "node_modules")
+  link_source_modules(node, npm, root_instance, "", "../" .. root_instance .. "/node_modules")
+end
+
 --[[ @implNote no dependsOn node:install: the migration proof packs while the
      author's package.json is still at the root, where node:install would place
      its own. The stage step exits NO_ROOT_MANIFEST on a root with none, and only
@@ -316,7 +371,11 @@ daukle.task{
     local root, pick = provision_node(context, spec)
     local node, npm = root:tool(pick.node), root:path(pick.npm)
     if declares_prepare(spec) then
-      install_packages(context, spec)
+      if spec.workspace ~= nil or spec.workspace_root ~= nil then
+        use_source_workspace_modules(context, spec, node, npm)
+      else
+        install_packages(context, spec)
+      end
       run_prepare(context, spec)
     end
     local argv = { "./" .. pack.SCRIPT_NAME, "stage", npm, context.root, publishable_manifest(context, spec), pack.STAGE_DIR, ".",
@@ -359,19 +418,8 @@ end
 --- nearest one pnpm finds, so pnpm never walks up to the project's. A rebuilt member holds no
 --- code, which a dependency tree does not read, so scripts are ignored.
 local function install_tree_workspace(context, spec, root, pick)
-  refuse_a_workspace_without_pins(spec)
-  daukle.write{ path = TREE_WORKSPACE .. "/package.json", text = settings.package_json(spec) }
-  daukle.write{ path = TREE_WORKSPACE .. "/" .. pnpm_workspace.NAME, text = pnpm_workspace.render(spec.workspace) }
-  daukle.write{ path = TREE_WORKSPACE .. "/pnpm-lock.yaml", text = spec.pnpm_lock.text }
+  write_rendered_workspace(spec, TREE_WORKSPACE)
   place_tree_patch_files(context, spec)
-  for _, member in ipairs(spec.workspace.members) do
-    local generated = daukle.read("build/daukle/" .. member.instance .. "/package.json")
-    if generated == nil then
-      error(string.format('workspace.members."%s" names the instance "%s", which generated no package.json',
-                          member.dir, member.instance), 0)
-    end
-    daukle.write{ path = TREE_WORKSPACE .. "/" .. member.dir .. "/package.json", text = generated }
-  end
   local pnpm = pnpm_behind_mirror(context, spec.pnpm_lock)
   daukle.exec(root:tool(pick.node), {
     "../" .. pnpm_mirror.SCRIPT_NAME, "../" .. pnpm_mirror.MAP_NAME, pnpm, "install", "--frozen-lockfile",
