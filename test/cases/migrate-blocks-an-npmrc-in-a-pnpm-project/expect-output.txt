@@ -1,0 +1,2 @@
+.npmrc
+configures a project that installs with pnpm, and daukle/pnpm's block has no key to carry its settings
