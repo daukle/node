@@ -85,12 +85,14 @@ function workspace_ranges.root_of_member(context, spec)
   return string.sub(context.root, 1, #context.root - #below_root)
 end
 
---- The scripts `pnpm pack` keeps: it drops `prepare` and leaves `"scripts": {}` when nothing else
+local DROPPED_WHEN_PACKED = { prepare = true, prepack = true, postpack = true }
+
+--- The scripts `pnpm pack` keeps: it drops these three and leaves `"scripts": {}` when nothing else
 --- remains (measured on 8.9.2, 10.34.9 and 12.18.0). Its other dropped names are all blocked.
-local function without_prepare(scripts)
+local function without_pack_lifecycle(scripts)
   local kept = {}
   for _, script in ipairs(scripts) do
-    if script.name ~= "prepare" then kept[#kept + 1] = script end
+    if not DROPPED_WHEN_PACKED[script.name] then kept[#kept + 1] = script end
   end
   return kept
 end
@@ -109,7 +111,7 @@ function workspace_ranges.resolved(spec, own_instance)
     end
     copy[field.ranges] = ranges
   end
-  copy.scripts = without_prepare(spec.scripts)
+  copy.scripts = without_pack_lifecycle(spec.scripts)
   copy.keeps_empty_scripts = #spec.scripts > 0
   return copy
 end

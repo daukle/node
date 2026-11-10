@@ -155,16 +155,20 @@ end
 
 local run_steps, run_script_steps
 
---- Runs the project's own `prepare`, which npm runs after a bare install and before a pack (D-243).
-local function run_prepare(context, spec)
+local function run_declared_script(context, spec, name)
   for _, script in ipairs(spec.scripts) do
-    if script.name == "prepare" then run_script_steps(context, spec, script) end
+    if script.name == name then run_script_steps(context, spec, script) end
   end
 end
 
-local function declares_prepare(spec)
+--- Runs the project's own `prepare`, which npm runs after a bare install and before a pack (D-243).
+local function run_prepare(context, spec)
+  run_declared_script(context, spec, "prepare")
+end
+
+local function declares_a_pack_script(spec)
   for _, script in ipairs(spec.scripts) do
-    if script.name == "prepare" then return true end
+    if script.name == "prepare" or script.name == "prepack" or script.name == "postpack" then return true end
   end
   return false
 end
@@ -370,12 +374,13 @@ daukle.task{
     end
     local root, pick = provision_node(context, spec)
     local node, npm = root:tool(pick.node), root:path(pick.npm)
-    if declares_prepare(spec) then
+    if declares_a_pack_script(spec) then
       if spec.workspace ~= nil or spec.workspace_root ~= nil then
         use_source_workspace_modules(context, spec, node, npm)
       else
         install_packages(context, spec)
       end
+      run_declared_script(context, spec, "prepack")
       run_prepare(context, spec)
     end
     local argv = { "./" .. pack.SCRIPT_NAME, "stage", npm, context.root, publishable_manifest(context, spec), pack.STAGE_DIR, ".",
@@ -386,6 +391,7 @@ daukle.task{
       result = daukle.exec(node, argv, { check = false })
     end
     if result.code ~= 0 then error("node:pack: node exited with code " .. result.code, 0) end
+    run_declared_script(context, spec, "postpack")
   end,
 }
 

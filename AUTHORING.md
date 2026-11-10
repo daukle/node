@@ -273,7 +273,8 @@ one of its rows.
   `node:pack` installs and runs it before staging, so the tarball holds what it builds. The proof's
   old side then packs a copy of the project (`with-scripts` in `lib/pack.lua`, everything but
   `.git`, `node_modules` and `build/daukle`) after npm installs it, so npm runs the original
-  `prepare`. Every other lifecycle name stays blocked.
+  `prepare`. `prepack` runs before it and `postpack` after the tarball, in npm's order, each on `node:pack` alone (`D-278`).
+  Every other lifecycle name stays blocked.
 - **`npm run <name> -- <words>` passes the words on** (`D-244`): the `script` step keeps them as
   `args`, and `run_steps` appends them to the called script's last step, as npm appends them to its
   command line. Words after the name without `--` are refused: npm reads them as its own options.

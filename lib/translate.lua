@@ -57,7 +57,7 @@ local READ = package_fields.READ
 local LIFECYCLE = {}
 for _, name in ipairs({ "preinstall", "install", "postinstall", "preprepare",
                         "postprepare", "prepublish", "prepublishOnly", "publish", "postpublish",
-                        "prepack", "pack", "postpack", "preversion", "version", "postversion",
+                        "pack", "preversion", "version", "postversion",
                         "dependencies" }) do
   LIFECYCLE[name] = true
 end
