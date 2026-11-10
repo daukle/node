@@ -1,0 +1,2 @@
+demo-own-bin-1.0.0.tgz
+bin/cli.js

@@ -216,7 +216,7 @@ toolchain cannot.
   `node_modules`, `.git` and the derived `build/daukle`, and a directory that search cannot list.
   One elsewhere migrates as an instance of its own and blocks only on what it declares.
 - Lifecycle scripts, and a `pre<x>` or `post<x>` beside an `<x>`.
-- `workspaces`, the project's own `bin`,
+- `workspaces`,
   `imports`, a `packageManager` naming anything but pnpm, and the other fields
   `NPM-SURFACE.md` records absent, and a field named with an escape it cannot carry verbatim.
 - An `engines.node` or `engines.npm` range no pinned release satisfies, or one it cannot read, and

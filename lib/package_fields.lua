@@ -16,7 +16,6 @@ package_fields.ABSENT = {
   bundleDependencies = "3. Dependencies: `bundleDependencies`",
   bundledDependencies = "3. Dependencies: `bundleDependencies`",
   workspaces = package_fields.ROWS.workspaces,
-  bin = "7. Packing and publishing: the project's own `bin`",
   imports = "2. Module resolution: the project's own `\"imports\"`, `#`-specifiers",
   config = "5. Scripts: the `config` field",
   os = "3. Dependencies", cpu = "3. Dependencies",

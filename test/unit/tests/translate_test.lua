@@ -118,7 +118,7 @@ return {
   translates('{"optionalDependencies":{"a":"1"}}', { version = "26.3.1", optionalPackages = { a = "1" } }),
   blocked('{"peerDependenciesMeta":["a"]}', "is not an object"),
   blocked('{"peerDependencies":{"a":"github:u/a"}}', 'peerDependencies."a"'),
-  blocked('{"bin":"cli.js"}', "bin"),
+  translates('{"bin":"cli.js"}', { version = "26.3.1", packageFields = { bin = '"cli.js"' } }),
   translates('{"somethingNew":1}', { version = "26.3.1", packageFields = { somethingNew = "1" } }),
   translates('{ "browserslist" : ["> 1%", "x"] , "a":{"b":[1,{"c":"}]\\""}]}, "n": null}',
              { version = "26.3.1",
