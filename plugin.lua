@@ -22,6 +22,18 @@ local nested = daukle.require("lib/nested")
 local pnpm_workspace = daukle.require("lib/pnpm_workspace")
 local instance_name = daukle.require("lib/instance_name")
 
+--- Whether this block installs with a pnpm that reads its overrides from the workspace file.
+local function reads_workspace_settings(spec)
+  return spec.pnpm_lock ~= nil and pnpm_workspace.reads_settings(spec.pnpm_lock.pnpm.version)
+end
+
+--- A pnpm workspace root's own overrides as a workspace file line, or nil when it declares none:
+--- `{}` is not written there, since a carried setting may declare the overrides instead.
+local function workspace_overrides_line(spec)
+  if spec.overrides == nil or not reads_workspace_settings(spec) then return nil end
+  return pnpm_workspace.overrides_line(spec.overrides)
+end
+
 daukle.toolchain{
   name = "node",
   generate = function(context)
@@ -40,7 +52,11 @@ daukle.toolchain{
       [nested.PLACEMENTS_NAME] = nested.placements_json(spec.nested),
       [links.WORKSPACE_NAME] = links.workspace_json(spec),
     }
-    if spec.workspace ~= nil then files[links.WORKSPACE_FILE_NAME] = pnpm_workspace.render(spec.workspace) end
+    if spec.workspace ~= nil then
+      files[links.WORKSPACE_FILE_NAME] = pnpm_workspace.render(spec.workspace, workspace_overrides_line(spec))
+    elseif reads_workspace_settings(spec) then
+      files[pnpm_workspace.NAME] = pnpm_workspace.overrides_line(spec.overrides) .. "\n"
+    end
     if spec.lock ~= nil then files["package-lock.json"] = spec.lock.text end
     if spec.pnpm_lock ~= nil then
       files["pnpm-lock.yaml"] = spec.pnpm_lock.text
@@ -308,7 +324,8 @@ end
 local function write_rendered_workspace(spec, directory)
   refuse_a_workspace_without_pins(spec)
   daukle.write{ path = directory .. "/package.json", text = settings.package_json(spec) }
-  daukle.write{ path = directory .. "/" .. pnpm_workspace.NAME, text = pnpm_workspace.render(spec.workspace) }
+  daukle.write{ path = directory .. "/" .. pnpm_workspace.NAME,
+                text = pnpm_workspace.render(spec.workspace, workspace_overrides_line(spec)) }
   daukle.write{ path = directory .. "/pnpm-lock.yaml", text = spec.pnpm_lock.text }
   for _, member in ipairs(spec.workspace.members) do
     daukle.write{ path = directory .. "/" .. member.dir .. "/package.json",
