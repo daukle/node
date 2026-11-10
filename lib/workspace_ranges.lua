@@ -85,6 +85,16 @@ function workspace_ranges.root_of_member(context, spec)
   return string.sub(context.root, 1, #context.root - #below_root)
 end
 
+--- The scripts `pnpm pack` keeps: it drops `prepare` and leaves `"scripts": {}` when nothing else
+--- remains (measured on 8.9.2, 10.34.9 and 12.18.0). Its other dropped names are all blocked.
+local function without_prepare(scripts)
+  local kept = {}
+  for _, script in ipairs(scripts) do
+    if script.name ~= "prepare" then kept[#kept + 1] = script end
+  end
+  return kept
+end
+
 --- A copy of `spec` whose ranges are the ones `pnpm pack` publishes.
 function workspace_ranges.resolved(spec, own_instance)
   local root_instance = spec.workspace_root or own_instance
@@ -99,6 +109,8 @@ function workspace_ranges.resolved(spec, own_instance)
     end
     copy[field.ranges] = ranges
   end
+  copy.scripts = without_prepare(spec.scripts)
+  copy.keeps_empty_scripts = #spec.scripts > 0
   return copy
 end
 

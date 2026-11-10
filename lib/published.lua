@@ -146,7 +146,7 @@ function published.manifest(spec)
   end
   local exact = spec.published[published.SCRIPT_TEXT] ~= nil and daukle.json_parse(spec.published[published.SCRIPT_TEXT]) or {}
   if spec.type ~= nil then members[#members + 1] = '"type": ' .. json_string(spec.type) end
-  if #spec.scripts > 0 then
+  if #spec.scripts > 0 or spec.keeps_empty_scripts then
     local script_names, rendered = {}, {}
     for index, script in ipairs(spec.scripts) do
       script_names[index] = script.name
