@@ -1,0 +1,1 @@
+this package carries a "pnpm" field and pnpm-pinned "overrides", which render as a second "pnpm" key

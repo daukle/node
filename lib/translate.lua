@@ -35,6 +35,8 @@ local function non_registry_kind(range)
   end
   if string.find(lowered, "://", 1, true) then return "a url" end
   if string.match(range, "^[%w][%w%-%._]*/[%w%-%._]+") then return "a GitHub \"user/repo\" shorthand" end
+  local protocol = string.match(lowered, "^(%a[%w%-]*):")
+  if protocol ~= nil then return 'a "' .. protocol .. ':" specifier, such as pnpm\'s jsr: or a named registry' end
   return nil
 end
 

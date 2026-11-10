@@ -227,6 +227,10 @@ end
 --- pnpm reads its own from `pnpm.overrides` and refuses a frozen install when they differ.
 local function overrides_field(spec)
   if spec.overrides == nil then return "" end
+  if spec.pnpm_lock ~= nil and spec.fields ~= nil and spec.fields.pnpm ~= nil then
+    error('this package carries a "pnpm" field and pnpm-pinned "overrides", which render as a second'
+          .. ' "pnpm" key: write the overrides inside the "pnpm" field\'s own text instead', 0)
+  end
   if spec.pnpm_lock ~= nil then return ',\n  "pnpm": { "overrides": ' .. spec.overrides .. ' }' end
   return ',\n  "overrides": ' .. spec.overrides
 end

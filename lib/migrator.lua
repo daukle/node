@@ -865,7 +865,13 @@ local function run_package(context, files, translation, workspace, members)
     end
   end
   for _, refused in ipairs(rc.blockers) do blockers[#blockers + 1] = refused end
-  if has_any(rc.config) and not has_dependencies(translation.config) then
+  if has_any(rc.config) and files.installs_with_pnpm then
+    blockers[#blockers + 1] = { construct = npmrc.NAME, where = rc.where,
+                                why = "configures a project that installs with pnpm, and daukle/pnpm's block has no key"
+                                      .. " to carry its settings, so they would be dropped, a registry or credential"
+                                      .. " with no check",
+                                surface = "PNPM-SURFACE.md: 3. The workspace file: a project `.npmrc`" }
+  elseif has_any(rc.config) and not has_dependencies(translation.config) then
     blockers[#blockers + 1] = { construct = npmrc.NAME, where = rc.where,
                                 why = "configures npm, and this package declares no dependencies for npm to"
                                       .. " resolve or install, so its keys would have nowhere to go",
