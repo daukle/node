@@ -1,0 +1,6 @@
+[toolchains.node.workspace]
+[toolchains.node.workspace.members]
+"packages/@acme/b" = "node-packages-_40acme-b"
+[toolchains.node-packages-_40acme-b]
+dir = "packages/@acme/b"
+workspace = "node"

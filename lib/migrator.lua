@@ -12,6 +12,7 @@ local nested = daukle.require("lib/nested")
 local package_fields = daukle.require("lib/package_fields")
 local frontend_pom = daukle.require("lib/frontend_pom")
 local pnpm_workspace = daukle.require("lib/pnpm_workspace")
+local instance_name = daukle.require("lib/instance_name")
 
 local PROBE_NAME = "__daukle_probe__.mjs"
 
@@ -784,20 +785,13 @@ local function without_workspaces_field(blockers)
   return kept
 end
 
---- The instance core names for the package in `dir`: `node` at the project root, else
---- `node-<dir>` with each `/` as `-`.
-local function instance_of(dir)
-  if dir == nil then return "node" end
-  return "node-" .. (string.gsub(dir, "/", "-"))
-end
-
 --- The root's `workspace` key: each member's directory below the root mapped to the instance core
 --- migrates it as, so the root's install runs the instances daukle.toml names.
 local function adopt_workspace(context, translation, workspace, members)
   translation.blockers = without_workspaces_field(translation.blockers)
   for _, refused in ipairs(workspace.blockers) do translation.blockers[#translation.blockers + 1] = refused end
   local instances = {}
-  for _, member in ipairs(members) do instances[member] = instance_of(within(context.dir, member)) end
+  for _, member in ipairs(members) do instances[member] = instance_name.of(within(context.dir, member)) end
   translation.config[pnpm_workspace.KEY] = {
     members = instances, catalog = workspace.catalog, catalogs = workspace.catalogs,
     settings = #(workspace.carried or {}) > 0 and table.concat(workspace.carried, "\n") or nil,
@@ -964,7 +958,7 @@ local function root_of_member(context, dir, exists)
   if workspace == nil or not installs_with_pnpm_in(dir, exists) then return nil end
   local relative = relative_to(dir, context.dir)
   if #pnpm_workspace.members(workspace, { relative }) == 0 then return nil end
-  return { dir = dir, instance = instance_of(dir), workspace = workspace }
+  return { dir = dir, instance = instance_name.of(dir), workspace = workspace }
 end
 
 --- The pnpm workspace root this package is a member of, `{ dir, instance, workspace }`, or nil.

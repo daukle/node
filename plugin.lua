@@ -20,6 +20,7 @@ local workspace_ranges = daukle.require("lib/workspace_ranges")
 local pnpm_mirror = daukle.require("lib/pnpm_mirror")
 local nested = daukle.require("lib/nested")
 local pnpm_workspace = daukle.require("lib/pnpm_workspace")
+local instance_name = daukle.require("lib/instance_name")
 
 daukle.toolchain{
   name = "node",
@@ -492,8 +493,7 @@ end
 local run_step_list
 
 --- The task of a nested package's own instance: the instance a workspace's `members` maps the
---- directory to, else as core names an instance it migrated, `node-<dir>` below the project with
---- every `/` a `-` (D-248).
+--- directory to, else as core names an instance it migrated (D-248).
 local function nested_task_name(context, spec, step)
   for _, member in ipairs(spec.workspace and spec.workspace.members or {}) do
     if member.dir == step.package then
@@ -502,7 +502,7 @@ local function nested_task_name(context, spec, step)
   end
   local root = package_root(context)
   local directory = root == "." and step.package or (root .. "/" .. step.package)
-  return "node-" .. (string.gsub(directory, "/", "-")) .. ":" .. scripts.task_name_of(step.name)
+  return instance_name.of(directory) .. ":" .. scripts.task_name_of(step.name)
 end
 
 --- Runs a nested package's script as that package's own task, keeping why it failed for the

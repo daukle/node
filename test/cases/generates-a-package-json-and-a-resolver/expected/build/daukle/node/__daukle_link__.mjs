@@ -1,5 +1,5 @@
-import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, rmSync,
-  symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync,
+  realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 const MARKER_KEY = "//";
@@ -235,9 +235,38 @@ function linkDerivedModules(target) {
   linkDirectory(target, derivedModules);
 }
 
+/** @implNote each link is made again against its resolved target, because pnpm's are relative to the depth it installed at and a copy sits at another; cpSync would remake them as plain symlinks, which Windows refuses where it allows a junction. */
+function copyInstalledTree(source, target) {
+  mkdirSync(target, { recursive: true });
+  for (const entry of readdirSync(source, { withFileTypes: true })) {
+    const from = join(source, entry.name);
+    const to = join(target, entry.name);
+    if (entry.isSymbolicLink()) linkDirectory(resolve(source, withoutDevicePrefix(readlinkSync(from))), to);
+    else if (entry.isDirectory()) copyInstalledTree(from, to);
+    else copyFileSync(from, to);
+  }
+}
+
+function copyWorkspaceModules(source, target) {
+  rmSync(target, { recursive: true, force: true });
+  copyInstalledTree(source, target);
+  writeFileSync(join(target, COPY_MARKER), "");
+}
+
 function copyModules() {
+  const installed = workspaceModules();
+  if (installed !== null) return copyWorkspaceModules(installed, rootModules);
   cpSync(derivedModules, rootModules, { recursive: true, verbatimSymlinks: true });
   writeFileSync(join(rootModules, COPY_MARKER), "");
+}
+
+/** @implNote a member's own placement runs before the root's install and at most once, so its copy is still empty until the root's placement after the install refreshes it. */
+function refreshMemberCopies() {
+  for (const directory of Object.values(workspace.members ?? {})) {
+    const copy = join(packageRoot, directory, "node_modules");
+    const installed = resolve(packageRoot, directory, workspace.modules);
+    if (existsSync(join(copy, COPY_MARKER)) && existsSync(installed)) copyWorkspaceModules(installed, copy);
+  }
 }
 
 function linkModules() {
@@ -326,6 +355,7 @@ try {
 const installed = workspaceModules();
 if (installed !== null) linkDerivedModules(installed);
 placeModules(modules);
+refreshMemberCopies();
 placeManifest();
 placeNested(nested);
 placeFiles(files);
